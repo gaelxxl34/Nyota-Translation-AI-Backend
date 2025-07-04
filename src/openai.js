@@ -27,10 +27,13 @@ const initializeOpenAI = () => {
 /**
  * Upload file to OpenAI and extract bulletin data using Vision API
  * @param {string} filePath - Local file path to process
+ * @param {string} formType - Form type ('form4' or 'form6')
  * @returns {Promise<Object>} Extracted and translated bulletin data
  */
-const uploadAndExtract = async (filePath) => {
-  console.log(`🔍 Starting OpenAI processing for file: ${filePath}`);
+const uploadAndExtract = async (filePath, formType = "form6") => {
+  console.log(
+    `🔍 Starting OpenAI processing for file: ${filePath} (${formType})`
+  );
 
   try {
     const openai = initializeOpenAI();
@@ -44,7 +47,7 @@ const uploadAndExtract = async (filePath) => {
     const fileStats = fs.statSync(filePath);
     const fileExtension = path.extname(filePath).toLowerCase();
     console.log(
-      `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}`
+      `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}, form type: ${formType}`
     );
 
     // Read file as base64 for Vision API

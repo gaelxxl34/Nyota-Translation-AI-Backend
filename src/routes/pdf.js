@@ -60,6 +60,15 @@ router.post("/export-pdf", async (req, res) => {
       // Use editedData if available (latest changes), otherwise fall back to originalData
       finalStudentData = bulletinData.editedData || bulletinData.originalData;
 
+      // Extract form type from Firestore metadata (with backward compatibility)
+      const formType =
+        bulletinData.formType || bulletinData.metadata?.formType || "form6";
+
+      // Include form type in the student data for template selection
+      if (finalStudentData) {
+        finalStudentData.formType = formType;
+      }
+
       console.log(
         "✅ Retrieved latest data from Firestore:",
         JSON.stringify(finalStudentData, null, 2)
@@ -69,6 +78,7 @@ router.post("/export-pdf", async (req, res) => {
         hasOriginalData: !!bulletinData.originalData,
         usingEditedData: !!bulletinData.editedData,
         studentName: finalStudentData?.studentName,
+        formType: formType,
         dataKeys: finalStudentData ? Object.keys(finalStudentData) : [],
       });
     } catch (firestoreError) {
@@ -140,6 +150,11 @@ router.post("/export-pdf", async (req, res) => {
     console.log(
       "💉 Injecting student data:",
       JSON.stringify(finalStudentData, null, 2)
+    );
+    console.log(
+      `🎯 PDF Generation: Using formType: ${
+        finalStudentData.formType || "form6"
+      } for template selection`
     );
 
     // Normalize the student data - handle different structures

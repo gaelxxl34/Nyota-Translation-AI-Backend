@@ -10,6 +10,7 @@ const path = require("path");
 const { verifyToken } = require("./auth");
 const uploadRoutes = require("./routes/upload");
 const pdfRoutes = require("./routes/pdf");
+const bulletinRoutes = require("./routes/bulletins");
 
 // Load environment variables
 dotenv.config();
@@ -69,6 +70,7 @@ app.get("/api/test", (req, res) => {
 // API routes
 app.use("/api/upload", uploadRoutes);
 app.use("/api", pdfRoutes);
+app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
 
 // Protected route - requires Firebase authentication
 app.get("/api/profile", verifyToken, (req, res) => {

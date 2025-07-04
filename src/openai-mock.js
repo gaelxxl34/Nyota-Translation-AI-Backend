@@ -8,10 +8,13 @@ const path = require("path");
  * Mock function to simulate OpenAI bulletin processing
  * Returns sample bulletin data for testing purposes
  * @param {string} filePath - Local file path (for logging only)
+ * @param {string} formType - Form type ('form4' or 'form6')
  * @returns {Promise<Object>} Mock extracted bulletin data
  */
-const uploadAndExtract = async (filePath) => {
-  console.log(`🎭 MOCK: Processing file ${filePath} with mock OpenAI`);
+const uploadAndExtract = async (filePath, formType = "form6") => {
+  console.log(
+    `🎭 MOCK: Processing file ${filePath} with mock OpenAI (${formType})`
+  );
 
   // Simulate processing delay
   await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -26,8 +29,11 @@ const uploadAndExtract = async (filePath) => {
     const fileStats = fs.statSync(filePath);
     const fileExtension = path.extname(filePath).toLowerCase();
     console.log(
-      `🎭 MOCK: File size: ${fileStats.size} bytes, extension: ${fileExtension}`
+      `🎭 MOCK: File size: ${fileStats.size} bytes, extension: ${fileExtension}, form type: ${formType}`
     );
+
+    // Return different mock data based on form type
+    const isForm4 = formType === "form4";
 
     // Return mock bulletin data
     const mockData = {
@@ -39,11 +45,15 @@ const uploadAndExtract = async (filePath) => {
         municipality: "GOMBE",
         school: "COMPLEXE SCOLAIRE SAINT JOSEPH",
         schoolCode: "12345678",
-        studentName: "MUKENDI KALALA Jean",
+        studentName: isForm4
+          ? "MUKENDI KALALA Jean (Form 4)"
+          : "MUKENDI KALALA Jean (Form 6)",
         gender: "M",
         birthPlace: "KINSHASA",
         birthDate: "15/03/2008",
-        class: "6TH YEAR HUMANITIES MATH-PHYSICS",
+        class: isForm4
+          ? "4TH YEAR HUMANITIES MATH-PHYSICS"
+          : "6TH YEAR HUMANITIES MATH-PHYSICS",
         permanentNumber: "87654321",
         idNumber: "123456789012345678",
         academicYear: "2023-2024",
@@ -309,6 +319,11 @@ const uploadAndExtract = async (filePath) => {
         centerCode: "54321",
         verifierName: "MUTOMBO KABONGO Pierre",
         endorsementDate: "20/07/2024",
+
+        // Form 4 specific fields
+        ...(isForm4 && {
+          secondSittingDate: "10/09/2024",
+        }),
       },
       metadata: {
         processingTime: "1000ms",

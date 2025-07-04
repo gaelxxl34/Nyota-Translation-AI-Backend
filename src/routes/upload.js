@@ -62,10 +62,23 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     console.log(`  - MIME type: ${req.file.mimetype}`);
     console.log(`  - Path: ${req.file.path}`);
 
+    // Extract and validate form type from request body
+    let formType = req.body.formType || "form6"; // Default to form6 for backwards compatibility
+
+    // Validate form type
+    if (!["form4", "form6"].includes(formType)) {
+      console.warn(
+        `⚠️ Invalid form type received: ${formType}, defaulting to form6`
+      );
+      formType = "form6";
+    }
+
+    console.log(`  - Form type: ${formType}`);
+
     try {
       // Process the file with OpenAI
       console.log(`🤖 Starting OpenAI processing for ${req.file.filename}...`);
-      const extractionResult = await uploadAndExtract(req.file.path);
+      const extractionResult = await uploadAndExtract(req.file.path, formType); // Pass form type to processing
 
       console.log(`✅ OpenAI processing completed for ${req.user.email}`);
 
@@ -92,6 +105,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             fileSize: req.file.size,
             filePath: req.file.path,
             status: extractionResult.success ? "processed" : "failed",
+            formType: formType, // Add form type to metadata
             studentName: extractionResult.success
               ? extractionResult.data?.studentName
               : null,
@@ -108,6 +122,17 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         // Save the main bulletin document
         await db.collection("bulletins").doc(firestoreDocId).set(bulletinDoc);
 
+        console.log(`✅ Saved bulletin document with form type: ${formType}`);
+        console.log(`📊 Document ID: ${firestoreDocId}`);
+        console.log(`📋 Form Type: ${formType}`);
+        console.log(
+          `👤 Student: ${
+            extractionResult.success
+              ? extractionResult.data?.studentName
+              : "N/A"
+          }`
+        );
+
         // Create initial version in subcollection (avoids array timestamp issues)
         if (extractionResult.success) {
           await db
@@ -119,6 +144,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
               timestamp: admin.firestore.FieldValue.serverTimestamp(),
               data: extractionResult.data,
               changeType: "initial_upload",
+              formType: formType, // Include form type in version tracking
               createdAt: new Date().toISOString(),
               userId: req.user.uid,
             });
@@ -141,6 +167,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           path: req.file.path,
           size: req.file.size,
           mimetype: req.file.mimetype,
+          formType: formType, // Include form type in file metadata
         },
         user: {
           uid: req.user.uid,
@@ -149,8 +176,10 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         processing: {
           ...extractionResult,
           firestoreId: firestoreDocId, // Include Firestore document ID
+          formType: formType, // Include form type in processing results
         },
         firestoreId: firestoreDocId, // Also include at top level for easy access
+        formType: formType, // Include form type at top level for easy access
         timestamp: new Date().toISOString(),
       });
     } catch (openaiError) {
@@ -168,6 +197,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           path: req.file.path,
           size: req.file.size,
           mimetype: req.file.mimetype,
+          formType: formType, // Include form type even in error response
         },
         user: {
           uid: req.user.uid,
@@ -176,9 +206,11 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         processing: {
           success: false,
           error: openaiError.message,
+          formType: formType, // Include form type in processing error
           details:
             "The file was uploaded successfully but could not be processed by AI. This might be due to API issues or invalid file content.",
         },
+        formType: formType, // Include form type at top level
         timestamp: new Date().toISOString(),
       });
     }
