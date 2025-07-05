@@ -34,15 +34,14 @@ const fileFilter = (req, file, cb) => {
     "image/png",
     "image/gif",
     "image/webp",
-    "application/pdf",
-  ];
+  ]; // Removed PDF
 
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
     cb(
       new Error(
-        `Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, GIF, WebP, PDF`
+        `Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, GIF, WebP`
       ),
       false
     );
