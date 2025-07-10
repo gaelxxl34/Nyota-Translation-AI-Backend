@@ -8,7 +8,7 @@ module.exports = {
     name: 'ntc-backend',
     
     // Path to the compiled JavaScript entry point
-    script: './dist/index.js',
+    script: './src/index.js',
     
     // Working directory (should be the backend root)
     cwd: '/var/www/ntc-backend',
