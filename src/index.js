@@ -3,29 +3,21 @@
 
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
 const path = require("path");
 
-// Import routes and middleware
+// Import configuration and utilities
+const config = require("./config/env");
 const { verifyToken } = require("./auth");
 const uploadRoutes = require("./routes/upload");
 const pdfRoutes = require("./routes/pdf");
 const bulletinRoutes = require("./routes/bulletins");
 
-// Load environment variables
-dotenv.config();
-
 const app = express();
-const PORT = process.env.PORT || 3001;
 
 // Middleware setup
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:3000",
-    ],
+    origin: config.cors.origins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -104,8 +96,9 @@ app.use("*", (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 NTC Backend server running on port ${PORT}`);
+app.listen(config.server.port, () => {
+  console.log(`🚀 NTC Backend server running on port ${config.server.port}`);
+  console.log(`🌍 Environment: ${config.server.nodeEnv}`);
 });
 
 module.exports = app;

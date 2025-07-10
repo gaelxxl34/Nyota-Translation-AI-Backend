@@ -5,6 +5,7 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
 const admin = require("firebase-admin");
+const config = require("../config/env");
 const router = express.Router();
 
 // Initialize Firebase Admin if not already initialized
@@ -21,7 +22,7 @@ router.post("/export-pdf", async (req, res) => {
     // Extract data from request body - FIRESTORE ID IS REQUIRED
     const {
       firestoreId, // REQUIRED: Firestore document ID - no longer optional
-      frontendUrl = "http://localhost:5173",
+      frontendUrl = config.frontend.url,
       waitSelector = "#bulletin-template",
       pdfOptions = {},
     } = req.body;
