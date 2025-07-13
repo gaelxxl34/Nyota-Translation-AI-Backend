@@ -14,8 +14,7 @@ const config = {
   frontend: {
     url: process.env.FRONTEND_URL || "http://localhost:5173",
     urlAlt: process.env.FRONTEND_URL_ALT || "http://localhost:5174",
-    urlProd:
-      process.env.FRONTEND_URL_PROD || "https://your-frontend-domain.com",
+    urlProd: process.env.FRONTEND_URL_PROD || "https://nyotatranslate.com/",
   },
 
   // CORS Configuration
