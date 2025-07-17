@@ -22,7 +22,7 @@ router.post("/export-pdf", async (req, res) => {
     // Extract data from request body - FIRESTORE ID IS REQUIRED
     const {
       firestoreId, // REQUIRED: Firestore document ID - no longer optional
-      frontendUrl = config.frontend.url,
+      frontendUrl = config.frontend.urlAlt, // Use port 5174 as default since that's where frontend is running
       waitSelector = "#bulletin-template",
       pdfOptions = {},
     } = req.body;
@@ -37,6 +37,11 @@ router.post("/export-pdf", async (req, res) => {
       return res.status(400).json({
         error:
           "Missing Firestore document ID. PDF generation now requires data to be stored in Firestore.",
+        debug: {
+          requestBody: req.body,
+          hasFirestoreId: !!firestoreId,
+          firestoreIdValue: firestoreId,
+        },
       });
     }
 
@@ -54,6 +59,11 @@ router.post("/export-pdf", async (req, res) => {
         console.error("❌ Firestore document not found:", firestoreId);
         return res.status(404).json({
           error: "Bulletin not found in Firestore",
+          debug: {
+            firestoreId: firestoreId,
+            collection: "bulletins",
+            docExists: bulletinDoc.exists,
+          },
         });
       }
 
@@ -97,6 +107,14 @@ router.post("/export-pdf", async (req, res) => {
       console.error("❌ No student data available in Firestore document");
       return res.status(400).json({
         error: "No student data found in Firestore document",
+        debug: {
+          firestoreId: firestoreId,
+          hasEditedData: !!bulletinData.editedData,
+          hasOriginalData: !!bulletinData.originalData,
+          dataStructure: {
+            keys: bulletinData ? Object.keys(bulletinData) : [],
+          },
+        },
       });
     }
 
@@ -459,6 +477,54 @@ router.post("/export-pdf", async (req, res) => {
     if (browser) {
       await browser.close();
     }
+  }
+});
+
+// DEBUG ENDPOINT - Get all bulletins for debugging
+router.get("/debug/bulletins", async (req, res) => {
+  try {
+    console.log("🔍 Debug: Listing all bulletins in Firestore...");
+    initializeFirebaseAdmin();
+    const db = admin.firestore();
+
+    const bulletinsSnapshot = await db.collection("bulletins").get();
+
+    if (bulletinsSnapshot.empty) {
+      return res.json({
+        message: "No bulletins found in Firestore",
+        count: 0,
+        bulletins: [],
+      });
+    }
+
+    const bulletins = [];
+    bulletinsSnapshot.forEach((doc) => {
+      const data = doc.data();
+      bulletins.push({
+        id: doc.id,
+        userId: data.userId,
+        userEmail: data.userEmail,
+        hasEditedData: !!data.editedData,
+        hasOriginalData: !!data.originalData,
+        metadata: data.metadata,
+        studentName:
+          data.editedData?.studentName ||
+          data.originalData?.studentName ||
+          "Unknown",
+      });
+    });
+
+    res.json({
+      message: "Bulletins found in Firestore",
+      count: bulletins.length,
+      bulletins: bulletins,
+    });
+  } catch (error) {
+    console.error("❌ Debug endpoint failed:", error);
+    res.status(500).json({
+      error: "Failed to fetch debug data",
+      details: error.message,
+    });
   }
 });
 

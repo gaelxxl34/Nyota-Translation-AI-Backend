@@ -25,42 +25,114 @@ const initializeOpenAI = () => {
 };
 
 /**
- * Upload file to OpenAI and extract bulletin data using Vision API
- * @param {string} filePath - Local file path to process
- * @param {string} formType - Form type ('form4' or 'form6')
- * @returns {Promise<Object>} Extracted and translated bulletin data
+ * Get MIME type from file extension
+ * @param {string} extension - File extension (e.g., '.jpg')
+ * @returns {string} MIME type
  */
-const uploadAndExtract = async (filePath, formType = "form6") => {
+const getMimeType = (extension) => {
+  const mimeTypes = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+  };
+
+  return mimeTypes[extension] || "application/octet-stream";
+};
+
+/**
+ * Prepare file for OpenAI processing
+ * @param {string} filePath - Path to the file
+ * @returns {Object} File data with base64 content and metadata
+ */
+const prepareFileForProcessing = (filePath) => {
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`File not found: ${filePath}`);
+  }
+
+  // Get file stats
+  const fileStats = fs.statSync(filePath);
+  const fileExtension = path.extname(filePath).toLowerCase();
   console.log(
-    `🔍 Starting OpenAI processing for file: ${filePath} (${formType})`
+    `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}`
   );
 
-  try {
-    const openai = initializeOpenAI();
+  // Read file as base64 for Vision API
+  const fileBuffer = fs.readFileSync(filePath);
+  const base64File = fileBuffer.toString("base64");
+  const mimeType = getMimeType(fileExtension);
 
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`);
-    }
+  return {
+    base64File,
+    mimeType,
+    fileStats,
+    fileExtension,
+    filename: path.basename(filePath),
+  };
+};
 
-    // Get file stats
-    const fileStats = fs.statSync(filePath);
-    const fileExtension = path.extname(filePath).toLowerCase();
-    console.log(
-      `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}, form type: ${formType}`
-    );
+/**
+ * Get system prompt based on form type
+ * @param {string} formType - The form type ('stateDiploma', 'form4', 'form6')
+ * @returns {string} System prompt for OpenAI
+ */
+const getSystemPrompt = (formType) => {
+  if (formType === "stateDiploma") {
+    return `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) State Diploma document analysis with 15+ years of experience. You specialize in extracting information from official State Examination Certificates.
 
-    // Read file as base64 for Vision API
-    const fileBuffer = fs.readFileSync(filePath);
-    const base64File = fileBuffer.toString("base64");
-    const mimeType = getMimeType(fileExtension);
+🎓 YOUR EXPERTISE:
+- Deep knowledge of DRC State Examination Certificate format and terminology
+- Expert in French-to-English translation for official DRC academic documents
+- Familiar with State Diploma information structure and data fields
+- Understanding of DRC academic grading and certification systems
 
-    console.log(
-      `📤 Processing ${fileExtension} file with OpenAI Vision API...`
-    );
+🏛️ STATE DIPLOMA STRUCTURE KNOWLEDGE:
+- Student identification information (name, gender, birth details)
+- Examination session and academic section/option
+- Overall percentage score and grade classification
+- Certificate issue information and serial numbers
+- Official stamps and verification details
 
-    // System prompt for bulletin extraction with senior DRC education expert persona
-    const systemPrompt = `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) French school bulletin translation with 15+ years of experience. You have processed thousands of bulletins from Congolese schools and know the education system inside and out.
+🔍 EXTRACTION REQUIREMENTS:
+1. Extract all visible text fields accurately
+2. Translate French text to appropriate English equivalents
+3. Preserve exact formatting for dates and numbers
+4. Identify certificate serial numbers and codes
+5. Extract percentage scores and grade classifications
+
+Return data in this exact JSON format:
+{
+  "extractionMetadata": {
+    "confidence": number (0-100),
+    "documentType": "stateDiploma",
+    "missingFields": [array of field names that couldn't be extracted],
+    "uncertainFields": [array of field names with low confidence],
+    "extractionNotes": "string with any important observations"
+  },
+  "studentName": "string or null",
+  "gender": "male|female or null",
+  "birthPlace": "string or null",
+  "birthDate": {
+    "day": "string or null",
+    "month": "string or null", 
+    "year": "string or null"
+  },
+  "examSession": "string or null",
+  "percentage": "string or null (with % symbol)",
+  "percentageText": "string or null (percentage written in words)",
+  "section": "string or null",
+  "option": "string or null",
+  "issueDate": "string or null",
+  "serialNumbers": ["array of individual characters/numbers"],
+  "serialCode": "string or null"
+}`;
+  }
+
+  // Default bulletin system prompt for form4/form6
+  return `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) French school bulletin translation with 15+ years of experience. You have processed thousands of bulletins from Congolese schools and know the education system inside and out.
 
 🎓 YOUR EXPERTISE:
 - Deep knowledge of DRC education system structure and terminology
@@ -78,7 +150,6 @@ const uploadAndExtract = async (filePath, formType = "form6") => {
 🏫 CLASS LEVEL TRANSLATIONS:
 - "4e" or "4ième" = Form 6 (not Form 4!)
 - "2ième" or "2e" = Form 4
-- 
 
 📚 STANDARD SUBJECTS FOR MATH-PHYSICS PROGRAMS (4ième Humanité):
 Expected subjects with typical maxima:
@@ -188,8 +259,37 @@ JSON SCHEMA (unchanged):
   "verifierName": "string or null",
   "endorsementDate": "string or null"
 }`;
+};
 
-    const userPrompt = `As a senior DRC education expert, analyze this bulletin and apply your deep knowledge:
+/**
+ * Get user prompt based on form type
+ * @param {string} formType - The form type ('stateDiploma', 'form4', 'form6')
+ * @returns {string} User prompt for OpenAI
+ */
+const getUserPrompt = (formType) => {
+  if (formType === "stateDiploma") {
+    return `As a senior DRC State Diploma expert, analyze this official State Examination Certificate and extract all visible information accurately.
+
+🎓 EXPERT ANALYSIS APPROACH:
+1. Identify the document as a DRC State Examination Certificate
+2. Extract student personal information (name, gender, birth details)
+3. Extract examination details (session, section, option)
+4. Extract scores and grades (percentage, grade classification)
+5. Extract certificate details (issue date, serial numbers, codes)
+6. Translate all French terms to appropriate English equivalents
+
+🚨 CRITICAL REQUIREMENTS:
+- Extract ONLY what is clearly visible - no guessing
+- Preserve exact formatting for important fields
+- Serial numbers should be extracted as individual characters
+- Translate section/option names appropriately
+- Return only clean JSON with no markdown formatting
+
+Analyze this State Diploma and return the extracted data in the specified JSON format.`;
+  }
+
+  // Default bulletin user prompt for form4/form6
+  return `As a senior DRC education expert, analyze this bulletin and apply your deep knowledge:
 
 🎓 EXPERT ANALYSIS APPROACH:
 1. Identify class level and program type first (e.g., 4ième Humanité Math-Physics)
@@ -213,146 +313,261 @@ JSON SCHEMA (unchanged):
 - Double-check extractions against your knowledge
 
 Extract with confidence as the senior expert you are. Return only clean JSON.`;
+};
 
-    // Call OpenAI Vision API with expert-focused parameters
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Using full GPT-4o for maximum accuracy
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: userPrompt,
+/**
+ * Call OpenAI API with prepared data
+ * @param {Object} fileData - Prepared file data
+ * @param {string} formType - Form type
+ * @returns {Promise<string>} OpenAI response content
+ */
+const callOpenAIAPI = async (fileData, formType) => {
+  const openai = initializeOpenAI();
+  const systemPrompt = getSystemPrompt(formType);
+  const userPrompt = getUserPrompt(formType);
+
+  console.log(
+    `📤 Processing ${fileData.fileExtension} file with OpenAI Vision API...`
+  );
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o", // Using full GPT-4o for maximum accuracy
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: userPrompt,
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${fileData.mimeType};base64,${fileData.base64File}`,
+              detail: "high", // Maximum detail for OCR accuracy
             },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64File}`,
-                detail: "high", // Maximum detail for OCR accuracy
-              },
-            },
-          ],
-        },
-      ],
-      max_tokens: 6000,
-      temperature: 0.0, // Zero temperature for maximum consistency
-      top_p: 0.1, // Very focused sampling
-      frequency_penalty: 0.0,
-      presence_penalty: 0.0,
-    });
+          },
+        ],
+      },
+    ],
+    max_tokens: 6000,
+    temperature: 0.0, // Zero temperature for maximum consistency
+    top_p: 0.1, // Very focused sampling
+    frequency_penalty: 0.0,
+    presence_penalty: 0.0,
+  });
 
-    const aiResponse = response.choices[0]?.message?.content;
+  const aiResponse = response.choices[0]?.message?.content;
 
-    if (!aiResponse) {
-      throw new Error("No response received from OpenAI");
+  if (!aiResponse) {
+    throw new Error("No response received from OpenAI");
+  }
+
+  console.log("🤖 Raw OpenAI response:", aiResponse);
+  return aiResponse;
+};
+
+/**
+ * Clean and parse OpenAI response
+ * @param {string} aiResponse - Raw OpenAI response
+ * @returns {Object} Parsed JSON data
+ */
+const parseOpenAIResponse = (aiResponse) => {
+  // Clean the response (remove any markdown formatting)
+  let cleanedResponse = aiResponse.replace(/```json\n?|\n?```/g, "").trim();
+
+  // Check if response was truncated and try to fix common issues
+  if (!cleanedResponse.endsWith("}")) {
+    console.warn("⚠️  Response appears truncated, attempting to fix...");
+    // Try to close the JSON properly
+    const openBraces = (cleanedResponse.match(/{/g) || []).length;
+    const closeBraces = (cleanedResponse.match(/}/g) || []).length;
+    const missingBraces = openBraces - closeBraces;
+
+    if (missingBraces > 0) {
+      cleanedResponse += "}".repeat(missingBraces);
+      console.log("🔧 Added missing closing braces");
     }
+  }
 
-    console.log("🤖 Raw OpenAI response:", aiResponse);
+  try {
+    const extractedData = JSON.parse(cleanedResponse);
+    return extractedData;
+  } catch (parseError) {
+    console.error("Failed to parse OpenAI response as JSON:", parseError);
+    console.error("Raw response length:", aiResponse.length);
+    console.error("Last 200 characters:", aiResponse.slice(-200));
+    throw new Error(
+      `Invalid JSON response from OpenAI: ${parseError.message}. Response may have been truncated due to token limit.`
+    );
+  }
+};
 
-    // Parse the JSON response with strict validation
-    let extractedData;
-    let validationResult;
-
-    try {
-      // Clean the response (remove any markdown formatting)
-      let cleanedResponse = aiResponse.replace(/```json\n?|\n?```/g, "").trim();
-
-      // Check if response was truncated and try to fix common issues
-      if (!cleanedResponse.endsWith("}")) {
-        console.warn("⚠️  Response appears truncated, attempting to fix...");
-        // Try to close the JSON properly
-        const openBraces = (cleanedResponse.match(/{/g) || []).length;
-        const closeBraces = (cleanedResponse.match(/}/g) || []).length;
-        const missingBraces = openBraces - closeBraces;
-
-        if (missingBraces > 0) {
-          cleanedResponse += "}".repeat(missingBraces);
-          console.log("🔧 Added missing closing braces");
-        }
-      }
-
-      extractedData = JSON.parse(cleanedResponse);
-
-      // Post-process: Sort subjects by maxima values (lower to higher) while preserving original order within groups
-      if (extractedData.subjects && Array.isArray(extractedData.subjects)) {
-        extractedData.subjects = sortSubjectsByMaxima(extractedData.subjects);
-        console.log(
-          "📊 Subjects sorted by maxima values (lower to higher), original order preserved within groups"
-        );
-      }
-
-      // Run strict validation
-      validationResult = validateExtractedData(extractedData);
-
-      // Log validation results
-      if (!validationResult.isValid) {
-        console.error("🚨 STRICT VALIDATION FAILED:");
-        validationResult.errors.forEach((error) =>
-          console.error(`   ❌ ${error}`)
-        );
-      }
-
-      if (validationResult.warnings.length > 0) {
-        console.warn("⚠️  VALIDATION WARNINGS:");
-        validationResult.warnings.forEach((warning) =>
-          console.warn(`   ⚠️  ${warning}`)
-        );
-      }
-
-      if (validationResult.missingRequired.length > 0) {
-        console.warn("📋 MISSING REQUIRED FIELDS:");
-        validationResult.missingRequired.forEach((field) =>
-          console.warn(`   📝 ${field}`)
-        );
-      }
-
-      // Enhance the extracted data with validation metadata
-      extractedData.validationResult = validationResult;
-    } catch (parseError) {
-      console.error("Failed to parse OpenAI response as JSON:", parseError);
-      console.error("Raw response length:", aiResponse.length);
-      console.error("Last 200 characters:", aiResponse.slice(-200));
-      throw new Error(
-        `Invalid JSON response from OpenAI: ${parseError.message}. Response may have been truncated due to token limit.`
-      );
-    }
-
+/**
+ * Process extracted data (sort subjects, run validation)
+ * @param {Object} extractedData - Parsed data from OpenAI
+ * @param {string} formType - Form type
+ * @returns {Object} Processed data with validation results
+ */
+const processExtractedData = (extractedData, formType) => {
+  // Post-process: Sort subjects by maxima values (lower to higher) while preserving original order within groups
+  if (extractedData.subjects && Array.isArray(extractedData.subjects)) {
+    extractedData.subjects = sortSubjectsByMaxima(extractedData.subjects);
     console.log(
-      "✅ Successfully extracted bulletin data:",
-      extractedData.studentName || "Unknown Student"
+      "📊 Subjects sorted by maxima values (lower to higher), original order preserved within groups"
+    );
+  }
+
+  // Run validation based on form type
+  let validationResult;
+  if (formType === "stateDiploma") {
+    validationResult = validateStateDiploma(extractedData);
+  } else {
+    validationResult = validateBulletin(extractedData, formType);
+  }
+
+  // Log validation results
+  logValidationResults(validationResult);
+
+  // Enhance the extracted data with validation metadata
+  extractedData.validationResult = validationResult;
+
+  return { extractedData, validationResult };
+};
+
+/**
+ * Log validation results to console
+ * @param {Object} validationResult - Validation results
+ */
+const logValidationResults = (validationResult) => {
+  if (!validationResult.isValid) {
+    console.error("🚨 STRICT VALIDATION FAILED:");
+    validationResult.errors.forEach((error) => console.error(`   ❌ ${error}`));
+  }
+
+  if (validationResult.warnings.length > 0) {
+    console.warn("⚠️  VALIDATION WARNINGS:");
+    validationResult.warnings.forEach((warning) =>
+      console.warn(`   ⚠️  ${warning}`)
+    );
+  }
+
+  if (validationResult.missingRequired.length > 0) {
+    console.warn("📋 MISSING REQUIRED FIELDS:");
+    validationResult.missingRequired.forEach((field) =>
+      console.warn(`   📝 ${field}`)
+    );
+  }
+};
+
+/**
+ * Log extraction summary
+ * @param {Object} extractedData - Extracted data
+ * @param {Object} validationResult - Validation results
+ */
+const logExtractionSummary = (extractedData, validationResult) => {
+  console.log(
+    "✅ Successfully extracted data:",
+    extractedData.studentName || "Unknown Student"
+  );
+
+  // Log extraction quality summary
+  console.log("📊 STRICT MODE EXTRACTION SUMMARY:");
+  console.log(`   👤 Student: ${extractedData.studentName || "Not extracted"}`);
+  console.log(`   🎓 Class: ${extractedData.class || "Not extracted"}`);
+  console.log(`   📚 Subjects: ${validationResult.subjectCount || 0}`);
+  console.log(
+    `   🎯 Validation: ${validationResult.isValid ? "PASS" : "FAIL"}`
+  );
+  console.log(
+    `   📈 Confidence: ${validationResult.extractionQuality || "N/A"}%`
+  );
+  console.log(
+    `   ⚠️  Issues: ${
+      validationResult.errors.length + validationResult.warnings.length
+    }`
+  );
+};
+
+/**
+ * Handle OpenAI API errors
+ * @param {Error} error - The error object
+ * @throws {Error} Formatted error message
+ */
+const handleOpenAIError = (error) => {
+  console.error("🚨 OpenAI processing failed:", error.message);
+  console.error("🔍 Error details:", {
+    status: error.status,
+    code: error.code,
+    type: error.type,
+    param: error.param,
+  });
+
+  // Handle specific OpenAI API errors
+  if (error.status === 429) {
+    throw new Error(
+      "OpenAI API quota exceeded. Please check your billing details and try again later."
+    );
+  } else if (error.status === 401) {
+    throw new Error(
+      "OpenAI API authentication failed. Please check your API key."
+    );
+  } else if (error.status === 400) {
+    throw new Error(
+      "Invalid request to OpenAI API. The file might be corrupted or in an unsupported format."
+    );
+  } else if (error.code === "insufficient_quota") {
+    throw new Error(
+      "OpenAI API quota insufficient. Please add credits to your OpenAI account or enable mock mode."
+    );
+  } else {
+    throw new Error(`OpenAI processing failed: ${error.message}`);
+  }
+};
+
+/**
+ * Upload file to OpenAI and extract data using Vision API
+ * @param {string} filePath - Local file path to process
+ * @param {string} formType - Form type ('form4', 'form6', or 'stateDiploma')
+ * @returns {Promise<Object>} Extracted and translated data
+ */
+const uploadAndExtract = async (filePath, formType = "form6") => {
+  console.log(
+    `🔍 Starting OpenAI processing for file: ${filePath} (${formType})`
+  );
+
+  try {
+    // Step 1: Prepare file for processing
+    const fileData = prepareFileForProcessing(filePath);
+    console.log(
+      `📄 File prepared: ${fileData.filename}, size: ${fileData.fileStats.size} bytes`
     );
 
-    // Log extraction quality summary
-    console.log("📊 STRICT MODE EXTRACTION SUMMARY:");
-    console.log(
-      `   👤 Student: ${extractedData.studentName || "Not extracted"}`
-    );
-    console.log(`   🎓 Class: ${extractedData.class || "Not extracted"}`);
-    console.log(`   📚 Subjects: ${validationResult.subjectCount}`);
-    console.log(
-      `   🎯 Validation: ${validationResult.isValid ? "PASS" : "FAIL"}`
-    );
-    console.log(
-      `   📈 Confidence: ${validationResult.extractionQuality || "N/A"}%`
-    );
-    console.log(
-      `   ⚠️  Issues: ${
-        validationResult.errors.length + validationResult.warnings.length
-      }`
-    );
+    // Step 2: Call OpenAI API
+    const aiResponse = await callOpenAIAPI(fileData, formType);
 
+    // Step 3: Parse response
+    const extractedData = parseOpenAIResponse(aiResponse);
+
+    // Step 4: Process and validate data
+    const { extractedData: processedData, validationResult } =
+      processExtractedData(extractedData, formType);
+
+    // Step 5: Log summary
+    logExtractionSummary(processedData, validationResult);
+
+    // Step 6: Return results
     return {
       success: true,
-      data: extractedData,
+      data: processedData,
       validation: validationResult,
       metadata: {
-        filename: path.basename(filePath),
-        fileSize: fileStats.size,
+        filename: fileData.filename,
+        fileSize: fileData.fileStats.size,
         processingTime: new Date().toISOString(),
         model: "gpt-4o",
         strictMode: true,
@@ -361,50 +576,78 @@ Extract with confidence as the senior expert you are. Return only clean JSON.`;
       },
     };
   } catch (error) {
-    console.error("🚨 OpenAI processing failed:", error.message);
-    console.error("🔍 Error details:", {
-      status: error.status,
-      code: error.code,
-      type: error.type,
-      param: error.param,
-    });
-
-    // Handle specific OpenAI API errors
-    if (error.status === 429) {
-      throw new Error(
-        "OpenAI API quota exceeded. Please check your billing details and try again later."
-      );
-    } else if (error.status === 401) {
-      throw new Error(
-        "OpenAI API authentication failed. Please check your API key."
-      );
-    } else if (error.status === 400) {
-      throw new Error(
-        "Invalid request to OpenAI API. The file might be corrupted or in an unsupported format."
-      );
-    } else if (error.code === "insufficient_quota") {
-      throw new Error(
-        "OpenAI API quota insufficient. Please add credits to your OpenAI account or enable mock mode."
-      );
-    } else {
-      throw new Error(`OpenAI processing failed: ${error.message}`);
-    }
+    handleOpenAIError(error);
   }
 };
 
 /**
- * Validate extracted bulletin data against strict requirements
- * @param {Object} data - The extracted bulletin data
+ * Validate State Diploma extracted data
+ * @param {Object} data - The extracted State Diploma data
  * @returns {Object} Validation result with errors and warnings
  */
-const validateExtractedData = (data) => {
+const validateStateDiploma = (data) => {
   const errors = [];
   const warnings = [];
   const required = [];
 
-  console.log("🔍 Starting strict validation of extracted data...");
+  console.log("🔍 Starting State Diploma validation...");
 
-  // Check required fields
+  const requiredFields = ["studentName", "examSession", "percentage"];
+
+  requiredFields.forEach((field) => {
+    if (!data[field] || data[field] === null) {
+      required.push(field);
+    }
+  });
+
+  // State Diploma specific warnings
+  if (!data.serialCode && !data.serialNumbers) {
+    warnings.push(
+      "Serial code/numbers not extracted - check certificate details"
+    );
+  }
+  if (!data.issueDate) {
+    warnings.push("Issue date not extracted - check bottom section");
+  }
+  if (!data.section || !data.option) {
+    warnings.push("Section/Option not extracted - check examination details");
+  }
+
+  const hasMinimumData = data.studentName && data.percentage;
+  const extractionQuality = hasMinimumData ? "good" : "poor";
+
+  console.log(
+    "✅ State Diploma validation complete:",
+    errors.length === 0 ? "PASS" : "FAIL"
+  );
+  console.log(
+    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`
+  );
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings,
+    missingRequired: required,
+    hasMinimumData,
+    extractionQuality,
+    subjectCount: 0, // State diplomas don't have subjects
+  };
+};
+
+/**
+ * Validate bulletin extracted data
+ * @param {Object} data - The extracted bulletin data
+ * @param {string} formType - The form type being validated
+ * @returns {Object} Validation result with errors and warnings
+ */
+const validateBulletin = (data, formType = "form6") => {
+  const errors = [];
+  const warnings = [];
+  const required = [];
+
+  console.log(`🔍 Starting bulletin validation for ${formType}...`);
+
   const requiredFields = ["studentName", "class", "academicYear", "subjects"];
 
   requiredFields.forEach((field) => {
@@ -419,135 +662,7 @@ const validateExtractedData = (data) => {
   } else {
     // Validate each subject
     data.subjects.forEach((subject, index) => {
-      if (!subject.subject) {
-        errors.push(`Subject ${index + 1}: Missing subject name`);
-      }
-
-      // Check for maxima values (critical)
-      if (
-        !subject.maxima ||
-        (subject.maxima.periodMaxima === null &&
-          subject.maxima.examMaxima === null &&
-          subject.maxima.totalMaxima === null)
-      ) {
-        warnings.push(
-          `Subject ${subject.subject || index + 1}: Missing maxima values`
-        );
-      }
-
-      // DRC-specific validation: Check for invalid maxima (must be ≥10)
-      if (subject.maxima) {
-        const { periodMaxima, examMaxima, totalMaxima } = subject.maxima;
-
-        if (periodMaxima !== null && periodMaxima < 10) {
-          errors.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: Invalid period maxima (${periodMaxima}) - DRC system minimum is 10`
-          );
-        }
-
-        if (examMaxima !== null && examMaxima < 10) {
-          errors.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: Invalid exam maxima (${examMaxima}) - DRC system minimum is 10`
-          );
-        }
-
-        if (totalMaxima !== null && totalMaxima < 10) {
-          errors.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: Invalid total maxima (${totalMaxima}) - DRC system minimum is 10`
-          );
-        }
-      }
-
-      // Check for grade completeness
-      const firstSem = subject.firstSemester || {};
-      const secondSem = subject.secondSemester || {};
-
-      if (
-        Object.values(firstSem).every((val) => val === null) &&
-        Object.values(secondSem).every((val) => val === null)
-      ) {
-        warnings.push(
-          `Subject ${subject.subject || index + 1}: No grades extracted`
-        );
-      }
-
-      // Additional validation: Check for suspicious patterns that might indicate invented grades
-      const allGrades = [
-        firstSem.period1,
-        firstSem.period2,
-        firstSem.exam,
-        firstSem.total,
-        secondSem.period3,
-        secondSem.period4,
-        secondSem.exam,
-        secondSem.total,
-      ].filter((grade) => grade !== null && grade !== undefined);
-
-      // Flag if all grades are perfect numbers (might indicate invention)
-      if (allGrades.length > 0) {
-        const allPerfectScores = allGrades.every((grade) => {
-          if (typeof grade !== "number") return false;
-          return grade % 5 === 0 || grade % 10 === 0; // All grades are multiples of 5 or 10
-        });
-
-        if (allPerfectScores && allGrades.length >= 6) {
-          warnings.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: All grades are perfect multiples (suspicious pattern)`
-          );
-        }
-
-        // Flag if confidence is high but grades seem too uniform
-        const avgGrade =
-          allGrades.reduce((sum, grade) => sum + grade, 0) / allGrades.length;
-        const variance =
-          allGrades.reduce(
-            (sum, grade) => sum + Math.pow(grade - avgGrade, 2),
-            0
-          ) / allGrades.length;
-
-        if (
-          subject.confidence &&
-          subject.confidence.gradesAvg > 90 &&
-          variance < 1 &&
-          allGrades.length >= 4
-        ) {
-          warnings.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: Suspiciously uniform grades with high confidence`
-          );
-        }
-      }
-
-      // Validate numeric types for first semester
-      ["period1", "period2", "exam", "total"].forEach((field) => {
-        if (firstSem[field] !== null && typeof firstSem[field] !== "number") {
-          errors.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: ${field} (Sem 1) is not a number`
-          );
-        }
-      });
-
-      // Validate numeric types for second semester (uses period3, period4)
-      ["period3", "period4", "exam", "total"].forEach((field) => {
-        if (secondSem[field] !== null && typeof secondSem[field] !== "number") {
-          errors.push(
-            `Subject ${
-              subject.subject || index + 1
-            }: ${field} (Sem 2) is not a number`
-          );
-        }
-      });
+      validateSubject(subject, index, errors, warnings);
     });
   }
 
@@ -584,7 +699,7 @@ const validateExtractedData = (data) => {
   const hasMinimumData =
     data.studentName && data.subjects && data.subjects.length > 0;
 
-  console.log(`✅ Validation complete: ${isValid ? "PASS" : "FAIL"}`);
+  console.log(`✅ Bulletin validation complete: ${isValid ? "PASS" : "FAIL"}`);
   console.log(
     `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`
   );
@@ -600,6 +715,192 @@ const validateExtractedData = (data) => {
       ? data.extractionMetadata.confidence
       : null,
   };
+};
+
+/**
+ * Validate individual subject data
+ * @param {Object} subject - Subject object to validate
+ * @param {number} index - Subject index for error reporting
+ * @param {Array} errors - Errors array to push to
+ * @param {Array} warnings - Warnings array to push to
+ */
+const validateSubject = (subject, index, errors, warnings) => {
+  if (!subject.subject) {
+    errors.push(`Subject ${index + 1}: Missing subject name`);
+  }
+
+  // Check for maxima values (critical)
+  if (
+    !subject.maxima ||
+    (subject.maxima.periodMaxima === null &&
+      subject.maxima.examMaxima === null &&
+      subject.maxima.totalMaxima === null)
+  ) {
+    warnings.push(
+      `Subject ${subject.subject || index + 1}: Missing maxima values`
+    );
+  }
+
+  // DRC-specific validation: Check for invalid maxima (must be ≥10)
+  if (subject.maxima) {
+    validateMaxima(subject, index, errors);
+  }
+
+  // Check for grade completeness
+  const firstSem = subject.firstSemester || {};
+  const secondSem = subject.secondSemester || {};
+
+  if (
+    Object.values(firstSem).every((val) => val === null) &&
+    Object.values(secondSem).every((val) => val === null)
+  ) {
+    warnings.push(
+      `Subject ${subject.subject || index + 1}: No grades extracted`
+    );
+  }
+
+  // Validate grade patterns and types
+  validateGradePatterns(subject, index, warnings);
+  validateGradeTypes(subject, index, errors);
+};
+
+/**
+ * Validate maxima values for a subject
+ * @param {Object} subject - Subject object
+ * @param {number} index - Subject index
+ * @param {Array} errors - Errors array to push to
+ */
+const validateMaxima = (subject, index, errors) => {
+  const { periodMaxima, examMaxima, totalMaxima } = subject.maxima;
+
+  if (periodMaxima !== null && periodMaxima < 10) {
+    errors.push(
+      `Subject ${
+        subject.subject || index + 1
+      }: Invalid period maxima (${periodMaxima}) - DRC system minimum is 10`
+    );
+  }
+
+  if (examMaxima !== null && examMaxima < 10) {
+    errors.push(
+      `Subject ${
+        subject.subject || index + 1
+      }: Invalid exam maxima (${examMaxima}) - DRC system minimum is 10`
+    );
+  }
+
+  if (totalMaxima !== null && totalMaxima < 10) {
+    errors.push(
+      `Subject ${
+        subject.subject || index + 1
+      }: Invalid total maxima (${totalMaxima}) - DRC system minimum is 10`
+    );
+  }
+};
+
+/**
+ * Validate grade patterns for suspicious data
+ * @param {Object} subject - Subject object
+ * @param {number} index - Subject index
+ * @param {Array} warnings - Warnings array to push to
+ */
+const validateGradePatterns = (subject, index, warnings) => {
+  const firstSem = subject.firstSemester || {};
+  const secondSem = subject.secondSemester || {};
+
+  const allGrades = [
+    firstSem.period1,
+    firstSem.period2,
+    firstSem.exam,
+    firstSem.total,
+    secondSem.period3,
+    secondSem.period4,
+    secondSem.exam,
+    secondSem.total,
+  ].filter((grade) => grade !== null && grade !== undefined);
+
+  if (allGrades.length > 0) {
+    // Flag if all grades are perfect numbers (might indicate invention)
+    const allPerfectScores = allGrades.every((grade) => {
+      if (typeof grade !== "number") return false;
+      return grade % 5 === 0 || grade % 10 === 0;
+    });
+
+    if (allPerfectScores && allGrades.length >= 6) {
+      warnings.push(
+        `Subject ${
+          subject.subject || index + 1
+        }: All grades are perfect multiples (suspicious pattern)`
+      );
+    }
+
+    // Flag if confidence is high but grades seem too uniform
+    const avgGrade =
+      allGrades.reduce((sum, grade) => sum + grade, 0) / allGrades.length;
+    const variance =
+      allGrades.reduce((sum, grade) => sum + Math.pow(grade - avgGrade, 2), 0) /
+      allGrades.length;
+
+    if (
+      subject.confidence &&
+      subject.confidence.gradesAvg > 90 &&
+      variance < 1 &&
+      allGrades.length >= 4
+    ) {
+      warnings.push(
+        `Subject ${
+          subject.subject || index + 1
+        }: Suspiciously uniform grades with high confidence`
+      );
+    }
+  }
+};
+
+/**
+ * Validate grade data types
+ * @param {Object} subject - Subject object
+ * @param {number} index - Subject index
+ * @param {Array} errors - Errors array to push to
+ */
+const validateGradeTypes = (subject, index, errors) => {
+  const firstSem = subject.firstSemester || {};
+  const secondSem = subject.secondSemester || {};
+
+  // Validate numeric types for first semester
+  ["period1", "period2", "exam", "total"].forEach((field) => {
+    if (firstSem[field] !== null && typeof firstSem[field] !== "number") {
+      errors.push(
+        `Subject ${
+          subject.subject || index + 1
+        }: ${field} (Sem 1) is not a number`
+      );
+    }
+  });
+
+  // Validate numeric types for second semester (uses period3, period4)
+  ["period3", "period4", "exam", "total"].forEach((field) => {
+    if (secondSem[field] !== null && typeof secondSem[field] !== "number") {
+      errors.push(
+        `Subject ${
+          subject.subject || index + 1
+        }: ${field} (Sem 2) is not a number`
+      );
+    }
+  });
+};
+
+/**
+ * Legacy function for backward compatibility
+ * @param {Object} data - The extracted data
+ * @param {string} formType - The form type being validated
+ * @returns {Object} Validation result
+ */
+const validateExtractedData = (data, formType = "form6") => {
+  if (formType === "stateDiploma") {
+    return validateStateDiploma(data);
+  } else {
+    return validateBulletin(data, formType);
+  }
 };
 
 /**
@@ -640,27 +941,25 @@ const sortSubjectsByMaxima = (subjects) => {
     });
 };
 
-/**
- * Get MIME type from file extension
- * @param {string} extension - File extension (e.g., '.jpg')
- * @returns {string} MIME type
- */
-const getMimeType = (extension) => {
-  const mimeTypes = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".pdf": "application/pdf",
-  };
-
-  return mimeTypes[extension] || "application/octet-stream";
-};
-
 module.exports = {
   initializeOpenAI,
   uploadAndExtract,
   validateExtractedData,
   sortSubjectsByMaxima,
+  // Exporting individual functions for better testability
+  getSystemPrompt,
+  getUserPrompt,
+  prepareFileForProcessing,
+  callOpenAIAPI,
+  parseOpenAIResponse,
+  processExtractedData,
+  validateStateDiploma,
+  validateBulletin,
+  validateSubject,
+  validateMaxima,
+  validateGradePatterns,
+  validateGradeTypes,
+  logValidationResults,
+  logExtractionSummary,
+  handleOpenAIError,
 };

@@ -25,6 +25,8 @@ const config = {
           "http://localhost:5173",
           "http://localhost:5174",
           "http://localhost:3000",
+          "https://nyotatranslate.com",
+          "https://www.nyotatranslate.com",
         ],
   },
 

@@ -10,7 +10,10 @@ const config = require("./config/env");
 const { verifyToken } = require("./auth");
 const uploadRoutes = require("./routes/upload");
 const pdfRoutes = require("./routes/pdf");
+const { extendPdfRouteForStateDiploma } = require("./routes/pdfExtension");
 const bulletinRoutes = require("./routes/bulletins");
+const diplomaRoutes = require("./routes/diploma");
+const stateDiplomaPdfRoutes = require("./routes/stateDiplomaPdf");
 
 const app = express();
 
@@ -61,7 +64,9 @@ app.get("/api/test", (req, res) => {
 
 // API routes
 app.use("/api/upload", uploadRoutes);
-app.use("/api", pdfRoutes);
+app.use("/api", extendPdfRouteForStateDiploma(pdfRoutes));
+app.use("/api", diplomaRoutes);
+app.use("/api", stateDiplomaPdfRoutes);
 app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
 
 // Protected route - requires Firebase authentication

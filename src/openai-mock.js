@@ -8,7 +8,7 @@ const path = require("path");
  * Mock function to simulate OpenAI bulletin processing
  * Returns sample bulletin data for testing purposes
  * @param {string} filePath - Local file path (for logging only)
- * @param {string} formType - Form type ('form4' or 'form6')
+ * @param {string} formType - Form type ('form4', 'form6', or 'stateDiploma')
  * @returns {Promise<Object>} Mock extracted bulletin data
  */
 const uploadAndExtract = async (filePath, formType = "form6") => {
@@ -33,6 +33,76 @@ const uploadAndExtract = async (filePath, formType = "form6") => {
     );
 
     // Return different mock data based on form type
+    if (formType === "stateDiploma") {
+      // Return mock State Diploma data
+      const mockData = {
+        success: true,
+        data: {
+          extractionMetadata: {
+            confidence: 95,
+            documentType: "stateDiploma",
+            missingFields: [],
+            uncertainFields: [],
+            extractionNotes:
+              "Mock extraction - State Diploma processed successfully",
+          },
+          studentName: "ONGORIKO BINANI GABI",
+          gender: "male",
+          birthPlace: "Kinshasa",
+          birthDate: {
+            day: "15",
+            month: "03",
+            year: "2005",
+          },
+          examSession: "JUNE 2023",
+          percentage: "72.5%",
+          percentageText: "SEVENTY-TWO POINT FIVE",
+          section: "SCIENTIFIC",
+          option: "BIOLOGY-CHEMISTRY",
+          issueDate: "December 10, 2023",
+          serialNumbers: [
+            "T",
+            "S",
+            "0",
+            "7",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+          ],
+          serialCode: "3456789",
+        },
+        validation: {
+          isValid: true,
+          errors: [],
+          warnings: [],
+          extractionQuality: "excellent",
+          hasMinimumData: true,
+        },
+        metadata: {
+          filename: path.basename(filePath),
+          fileSize: fileStats.size,
+          processingTime: new Date().toISOString(),
+          model: "mock-gpt-4o",
+          strictMode: true,
+          extractionQuality: "excellent",
+          hasMinimumData: true,
+        },
+      };
+
+      console.log("🎭 MOCK: Generated mock State Diploma data");
+      return mockData;
+    }
+
+    // Return different mock data based on form type for bulletins
     const isForm4 = formType === "form4";
 
     // Return mock bulletin data

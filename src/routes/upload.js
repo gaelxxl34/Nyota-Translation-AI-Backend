@@ -66,7 +66,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     let formType = req.body.formType || "form6"; // Default to form6 for backwards compatibility
 
     // Validate form type
-    if (!["form4", "form6"].includes(formType)) {
+    if (!["form4", "form6", "stateDiploma"].includes(formType)) {
       console.warn(
         `⚠️ Invalid form type received: ${formType}, defaulting to form6`
       );
@@ -91,13 +91,33 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         // Generate bulletin document ID
         firestoreDocId = `bulletin_${req.user.uid}_${Date.now()}`;
 
+        // Clean data to remove undefined values for Firestore
+        const cleanDataForFirestore = (data) => {
+          if (data === null || data === undefined) return null;
+          if (typeof data !== "object") return data;
+          if (Array.isArray(data))
+            return data.map((item) => cleanDataForFirestore(item));
+
+          const cleaned = {};
+          for (const [key, value] of Object.entries(data)) {
+            if (value !== undefined) {
+              cleaned[key] = cleanDataForFirestore(value);
+            }
+          }
+          return cleaned;
+        };
+
+        const cleanedData = extractionResult.success
+          ? cleanDataForFirestore(extractionResult.data)
+          : null;
+
         // Create bulletin document in Firestore with proper structure
         const bulletinDoc = {
           id: firestoreDocId,
           userId: req.user.uid,
           userEmail: req.user.email,
-          originalData: extractionResult.success ? extractionResult.data : null,
-          editedData: extractionResult.success ? extractionResult.data : null,
+          originalData: cleanedData,
+          editedData: cleanedData,
           metadata: {
             uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
             lastModified: admin.firestore.FieldValue.serverTimestamp(),
@@ -107,7 +127,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             status: extractionResult.success ? "processed" : "failed",
             formType: formType, // Add form type to metadata
             studentName: extractionResult.success
-              ? extractionResult.data?.studentName
+              ? cleanedData?.studentName
               : null,
             createdAt: new Date().toISOString(),
             lastModifiedAt: new Date().toISOString(),
@@ -134,7 +154,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         );
 
         // Create initial version in subcollection (avoids array timestamp issues)
-        if (extractionResult.success) {
+        if (extractionResult.success && cleanedData) {
           await db
             .collection("bulletins")
             .doc(firestoreDocId)
@@ -142,7 +162,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             .add({
               versionNumber: 1,
               timestamp: admin.firestore.FieldValue.serverTimestamp(),
-              data: extractionResult.data,
+              data: cleanedData,
               changeType: "initial_upload",
               formType: formType, // Include form type in version tracking
               createdAt: new Date().toISOString(),
