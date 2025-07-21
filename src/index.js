@@ -14,6 +14,7 @@ const { extendPdfRouteForStateDiploma } = require("./routes/pdfExtension");
 const bulletinRoutes = require("./routes/bulletins");
 const diplomaRoutes = require("./routes/diploma");
 const stateDiplomaPdfRoutes = require("./routes/stateDiplomaPdf");
+const qrRoutes = require("./routes/qr");
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api", extendPdfRouteForStateDiploma(pdfRoutes));
 app.use("/api", diplomaRoutes);
 app.use("/api", stateDiplomaPdfRoutes);
+app.use("/api/qr", qrRoutes); // QR code generation routes (public - no auth required)
 app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
 
 // Protected route - requires Firebase authentication

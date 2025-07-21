@@ -73,3 +73,7 @@ debug-*.json
 *.backup
 *.bak
 *.tmp
+
+# User registration scripts (sensitive)
+register-users.js
+register-users-*.js
