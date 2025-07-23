@@ -18,6 +18,12 @@ const qrRoutes = require("./routes/qr");
 
 const app = express();
 
+// Set server timeout for long-running operations like OpenAI processing
+const server = require("http").createServer(app);
+server.timeout = 300000; // 5 minutes timeout
+server.keepAliveTimeout = 65000; // Keep alive timeout
+server.headersTimeout = 66000; // Headers timeout (should be > keepAliveTimeout)
+
 // Middleware setup
 app.use(
   cors({
@@ -103,9 +109,10 @@ app.use("*", (req, res) => {
 });
 
 // Start server
-app.listen(config.server.port, () => {
+server.listen(config.server.port, () => {
   console.log(`🚀 NTC Backend server running on port ${config.server.port}`);
   console.log(`🌍 Environment: ${config.server.nodeEnv}`);
+  console.log(`⏱️ Server timeout: ${server.timeout}ms`);
 });
 
 module.exports = app;

@@ -18,6 +18,8 @@ const initializeOpenAI = () => {
 
   const openai = new OpenAI({
     apiKey: apiKey,
+    timeout: 240000, // 4 minutes timeout for OpenAI API calls
+    maxRetries: 2, // Retry failed requests up to 2 times
   });
 
   console.log("🤖 OpenAI client initialized successfully");

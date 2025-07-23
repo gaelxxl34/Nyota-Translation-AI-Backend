@@ -78,7 +78,19 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     try {
       // Process the file with OpenAI
       console.log(`🤖 Starting OpenAI processing for ${req.file.filename}...`);
-      const extractionResult = await uploadAndExtract(req.file.path, formType); // Pass form type to processing
+
+      // Add timeout wrapper for OpenAI processing
+      const processingTimeout = new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error("OpenAI processing timeout after 4 minutes")),
+          240000
+        );
+      });
+
+      const extractionResult = await Promise.race([
+        uploadAndExtract(req.file.path, formType),
+        processingTimeout,
+      ]);
 
       console.log(`✅ OpenAI processing completed for ${req.user.email}`);
 
@@ -208,9 +220,19 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         openaiError.message
       );
 
-      // Return partial success - file uploaded but processing failed
-      res.status(206).json({
-        message: "File uploaded successfully, but processing failed",
+      // Determine if this is a timeout error
+      const isTimeout =
+        openaiError.message.includes("timeout") ||
+        openaiError.message.includes("Timeout") ||
+        openaiError.code === "ETIMEDOUT";
+
+      const statusCode = isTimeout ? 408 : 206; // 408 for timeout, 206 for partial success
+
+      // Return appropriate error response
+      res.status(statusCode).json({
+        message: isTimeout
+          ? "Processing timed out. Please try again with a smaller file or simpler document."
+          : "File uploaded successfully, but processing failed",
         file: {
           filename: req.file.filename,
           originalName: req.file.originalname,
@@ -227,8 +249,10 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           success: false,
           error: openaiError.message,
           formType: formType, // Include form type in processing error
-          details:
-            "The file was uploaded successfully but could not be processed by AI. This might be due to API issues or invalid file content.",
+          isTimeout: isTimeout,
+          details: isTimeout
+            ? "The document processing took too long. This might be due to a complex document or temporary API issues. Please try again with a smaller or simpler document."
+            : "The file was uploaded successfully but could not be processed by AI. This might be due to API issues or invalid file content.",
         },
         formType: formType, // Include form type at top level
         timestamp: new Date().toISOString(),
