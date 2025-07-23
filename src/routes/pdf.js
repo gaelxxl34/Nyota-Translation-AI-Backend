@@ -25,6 +25,7 @@ router.post("/export-pdf", async (req, res) => {
       frontendUrl = config.frontend.urlAlt, // Use port 5174 as default since that's where frontend is running
       waitSelector = "#bulletin-template",
       waitForImages = false, // NEW: Wait for images including QR codes
+      tableSize = "auto", // Table size for Form6 template
       pdfOptions = {},
     } = req.body;
 
@@ -144,8 +145,10 @@ router.post("/export-pdf", async (req, res) => {
       deviceScaleFactor: 2,
     });
 
-    // Navigate to the card-only page
-    const cardUrl = `${frontendUrl}/card-only`;
+    // Navigate to the card-only page with table size parameter
+    const cardUrl = `${frontendUrl}/card-only?tableSize=${encodeURIComponent(
+      tableSize
+    )}`;
     console.log("🌐 Navigating to:", cardUrl);
 
     await page.goto(cardUrl, {
