@@ -281,26 +281,4 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
 // Apply multer error handling middleware
 router.use(handleMulterError);
 
-/**
- * GET /api/upload/status/:id
- * Check processing status of uploaded bulletin
- */
-router.get("/status/:id", verifyToken, async (req, res) => {
-  try {
-    // TODO: Implement status checking
-    // Query Firestore for processing status
-    // Return current status and results if complete
-
-    console.log("📊 Status check endpoint - Not implemented yet");
-
-    res.status(200).json({
-      message: "Status check endpoint ready",
-      bulletinId: req.params.id,
-    });
-  } catch (error) {
-    console.error("🚨 Status check failed:", error.message);
-    res.status(500).json({ error: "Failed to check status" });
-  }
-});
-
 module.exports = router;

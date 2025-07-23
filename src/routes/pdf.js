@@ -24,6 +24,7 @@ router.post("/export-pdf", async (req, res) => {
       firestoreId, // REQUIRED: Firestore document ID - no longer optional
       frontendUrl = config.frontend.urlAlt, // Use port 5174 as default since that's where frontend is running
       waitSelector = "#bulletin-template",
+      waitForImages = false, // NEW: Wait for images including QR codes
       pdfOptions = {},
     } = req.body;
 
@@ -221,8 +222,13 @@ router.post("/export-pdf", async (req, res) => {
       normalizedData = finalStudentData.data;
     }
 
+    // ADD FIRESTORE DOCUMENT ID FOR QR CODE GENERATION
+    normalizedData.documentId = firestoreId;
+    normalizedData.firestoreId = firestoreId;
+    normalizedData.id = firestoreId;
+
     console.log(
-      "📊 Normalized data for injection:",
+      "📊 Normalized data for injection (with documentId):",
       JSON.stringify(normalizedData, null, 2)
     );
 
@@ -407,6 +413,57 @@ router.post("/export-pdf", async (req, res) => {
     // Wait an additional moment for any dynamic content to load
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
+    // Wait for images if requested (especially QR codes)
+    if (waitForImages) {
+      console.log("⏳ Waiting for all images (including QR codes) to load...");
+
+      await page.waitForFunction(
+        () => {
+          const images = Array.from(document.querySelectorAll("img"));
+          const qrImages = Array.from(
+            document.querySelectorAll(
+              '.qr-container img, [data-print-element="qr-image"]'
+            )
+          );
+
+          console.log(
+            `Found ${images.length} total images, ${qrImages.length} QR images`
+          );
+
+          // Check if all images are loaded
+          const allImagesLoaded = images.every((img) => {
+            if (img.complete && img.naturalHeight !== 0) {
+              return true;
+            }
+            console.log("Waiting for image:", img.src || img.alt || "unknown");
+            return false;
+          });
+
+          // Special check for QR codes
+          const qrCodesLoaded =
+            qrImages.length === 0 ||
+            qrImages.every((img) => {
+              const loaded = img.complete && img.naturalHeight !== 0;
+              if (!loaded) {
+                console.log(
+                  "Waiting for QR code:",
+                  img.src ? img.src.substring(0, 50) : "unknown"
+                );
+              }
+              return loaded;
+            });
+
+          console.log(
+            `Images loaded: ${allImagesLoaded}, QR codes loaded: ${qrCodesLoaded}`
+          );
+          return allImagesLoaded && qrCodesLoaded;
+        },
+        { timeout: 15000, polling: 1000 }
+      );
+
+      console.log("✅ All images (including QR codes) have loaded");
+    }
+
     // Hide all elements except the bulletin template
     await page.evaluate((selector) => {
       // Hide body's direct children except the bulletin container
@@ -477,54 +534,6 @@ router.post("/export-pdf", async (req, res) => {
     if (browser) {
       await browser.close();
     }
-  }
-});
-
-// DEBUG ENDPOINT - Get all bulletins for debugging
-router.get("/debug/bulletins", async (req, res) => {
-  try {
-    console.log("🔍 Debug: Listing all bulletins in Firestore...");
-    initializeFirebaseAdmin();
-    const db = admin.firestore();
-
-    const bulletinsSnapshot = await db.collection("bulletins").get();
-
-    if (bulletinsSnapshot.empty) {
-      return res.json({
-        message: "No bulletins found in Firestore",
-        count: 0,
-        bulletins: [],
-      });
-    }
-
-    const bulletins = [];
-    bulletinsSnapshot.forEach((doc) => {
-      const data = doc.data();
-      bulletins.push({
-        id: doc.id,
-        userId: data.userId,
-        userEmail: data.userEmail,
-        hasEditedData: !!data.editedData,
-        hasOriginalData: !!data.originalData,
-        metadata: data.metadata,
-        studentName:
-          data.editedData?.studentName ||
-          data.originalData?.studentName ||
-          "Unknown",
-      });
-    });
-
-    res.json({
-      message: "Bulletins found in Firestore",
-      count: bulletins.length,
-      bulletins: bulletins,
-    });
-  } catch (error) {
-    console.error("❌ Debug endpoint failed:", error);
-    res.status(500).json({
-      error: "Failed to fetch debug data",
-      details: error.message,
-    });
   }
 });
 

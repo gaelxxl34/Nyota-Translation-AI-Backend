@@ -20,6 +20,7 @@ router.post("/state-diploma-pdf", async (req, res) => {
     const {
       diplomaData,
       frontendUrl = config.frontend?.url || "http://localhost:5173", // Use port 5173 as default
+      waitForImages = false, // NEW: Wait for images including QR codes
       pdfOptions = {
         format: "A4",
         landscape: true,
@@ -227,6 +228,57 @@ router.post("/state-diploma-pdf", async (req, res) => {
     );
 
     console.log("✅ Template content has loaded successfully");
+
+    // Wait for images if requested (especially QR codes)
+    if (waitForImages) {
+      console.log("⏳ Waiting for all images (including QR codes) to load...");
+
+      await page.waitForFunction(
+        () => {
+          const images = Array.from(document.querySelectorAll("img"));
+          const qrImages = Array.from(
+            document.querySelectorAll(
+              '.qr-container img, [data-print-element="qr-image"]'
+            )
+          );
+
+          console.log(
+            `Found ${images.length} total images, ${qrImages.length} QR images`
+          );
+
+          // Check if all images are loaded
+          const allImagesLoaded = images.every((img) => {
+            if (img.complete && img.naturalHeight !== 0) {
+              return true;
+            }
+            console.log("Waiting for image:", img.src || img.alt || "unknown");
+            return false;
+          });
+
+          // Special check for QR codes
+          const qrCodesLoaded =
+            qrImages.length === 0 ||
+            qrImages.every((img) => {
+              const loaded = img.complete && img.naturalHeight !== 0;
+              if (!loaded) {
+                console.log(
+                  "Waiting for QR code:",
+                  img.src ? img.src.substring(0, 50) : "unknown"
+                );
+              }
+              return loaded;
+            });
+
+          console.log(
+            `Images loaded: ${allImagesLoaded}, QR codes loaded: ${qrCodesLoaded}`
+          );
+          return allImagesLoaded && qrCodesLoaded;
+        },
+        { timeout: 15000, polling: 1000 }
+      );
+
+      console.log("✅ All images (including QR codes) have loaded");
+    }
 
     // Isolate and optimize the diploma template for PDF rendering with explicit landscape orientation
     await page.evaluate(() => {
