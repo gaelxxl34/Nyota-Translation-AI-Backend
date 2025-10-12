@@ -8,6 +8,18 @@ const verifyToken = require("../auth");
 const router = express.Router();
 
 /**
+ * OPTIONS /api/qr/:documentId
+ * Handle CORS preflight requests for mobile browsers
+ */
+router.options("/:documentId", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Max-Age", "86400");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.status(204).send();
+});
+
+/**
  * GET /api/qr/:documentId
  * Generates a QR code image for document verification
  */
@@ -27,6 +39,7 @@ router.get("/:documentId", async (req, res) => {
 
     console.log(`🔗 Generating QR code for document: ${documentId}`);
     console.log(`🔗 Verification URL: ${verificationUrl}`);
+    console.log(`📱 User Agent: ${req.headers['user-agent']}`);
 
     // Generate QR code options
     const options = {
@@ -42,10 +55,20 @@ router.get("/:documentId", async (req, res) => {
     // Generate QR code as PNG buffer
     const qrBuffer = await QRCode.toBuffer(verificationUrl, options);
 
-    // Set response headers for image
+    // Set response headers for image with better mobile caching support
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Content-Length", qrBuffer.length);
-    res.setHeader("Cache-Control", "public, max-age=3600"); // Cache for 1 hour
+    
+    // Improved caching and mobile-friendly headers
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800"); // 24 hours cache, 7 days stale
+    res.setHeader("ETag", `"qr-${documentId}"`);
+    res.setHeader("Vary", "Accept-Encoding");
+    
+    // Mobile-specific headers
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Access-Control-Allow-Origin", "*"); // Allow all origins for QR codes
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
 
     // Send the QR code image
     res.send(qrBuffer);
