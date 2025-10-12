@@ -39,7 +39,7 @@ router.get("/:documentId", async (req, res) => {
 
     console.log(`🔗 Generating QR code for document: ${documentId}`);
     console.log(`🔗 Verification URL: ${verificationUrl}`);
-    console.log(`📱 User Agent: ${req.headers['user-agent']}`);
+    console.log(`📱 User Agent: ${req.headers["user-agent"]}`);
 
     // Generate QR code options
     const options = {
@@ -58,12 +58,15 @@ router.get("/:documentId", async (req, res) => {
     // Set response headers for image with better mobile caching support
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Content-Length", qrBuffer.length);
-    
+
     // Improved caching and mobile-friendly headers
-    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800"); // 24 hours cache, 7 days stale
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=86400, stale-while-revalidate=604800"
+    ); // 24 hours cache, 7 days stale
     res.setHeader("ETag", `"qr-${documentId}"`);
     res.setHeader("Vary", "Accept-Encoding");
-    
+
     // Mobile-specific headers
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Access-Control-Allow-Origin", "*"); // Allow all origins for QR codes
