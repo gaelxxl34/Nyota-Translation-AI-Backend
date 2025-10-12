@@ -33,7 +33,6 @@ const config = {
   // OpenAI Configuration
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    useMock: process.env.USE_OPENAI_MOCK === "true",
   },
 
   // Firebase Configuration
@@ -73,7 +72,6 @@ const config = {
     console.log(`   - Server Port: ${this.server.port}`);
     console.log(`   - Frontend URL: ${this.frontend.url}`);
     console.log(`   - CORS Origins: ${this.cors.origins.join(", ")}`);
-    console.log(`   - OpenAI Mock Mode: ${this.openai.useMock}`);
     console.log(`   - Firebase Project: ${this.firebase.projectId}`);
   },
 };

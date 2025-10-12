@@ -12,20 +12,13 @@ let isInitialized = false;
 const initializeOpenAI = () => {
   if (isInitialized) return;
 
-  const config = require("../config");
+  // Use optimized OpenAI implementation
+  const openaiModule = require("../openai-optimized");
 
-  // Choose OpenAI implementation based on configuration
-  const openaiModule = config.openai.useMock
-    ? require("../openai-mock")
-    : require("../openai");
+  uploadAndExtract =
+    openaiModule.uploadAndExtractOptimized || openaiModule.uploadAndExtract;
 
-  uploadAndExtract = openaiModule.uploadAndExtract;
-
-  console.log(
-    `🤖 OpenAI Mode: ${
-      config.openai.useMock ? "MOCK (Testing)" : "REAL (Production)"
-    }`
-  );
+  console.log(`🤖 OpenAI Mode: OPTIMIZED (Production)`);
   isInitialized = true;
 };
 
@@ -65,8 +58,16 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     // Extract and validate form type from request body
     let formType = req.body.formType || "form6"; // Default to form6 for backwards compatibility
 
-    // Validate form type
-    if (!["form4", "form6", "stateDiploma"].includes(formType)) {
+    // Validate form type - now supporting all 6 document types
+    const validFormTypes = [
+      "form4",
+      "form6",
+      "collegeTranscript",
+      "collegeAttestation",
+      "stateDiploma",
+      "bachelorDiploma",
+    ];
+    if (!validFormTypes.includes(formType)) {
       console.warn(
         `⚠️ Invalid form type received: ${formType}, defaulting to form6`
       );
@@ -93,6 +94,33 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       ]);
 
       console.log(`✅ OpenAI processing completed for ${req.user.email}`);
+
+      // POST-PROCESSING: Override specific fields for college transcripts to ensure English fixed values
+      if (
+        formType === "collegeTranscript" &&
+        extractionResult.success &&
+        extractionResult.data
+      ) {
+        console.log(
+          `🔧 Applying fixed English values for college transcript...`
+        );
+
+        // Override country to uppercase English
+        extractionResult.data.country = "DEMOCRATIC REPUBLIC OF THE CONGO";
+
+        // Override institution type to English
+        extractionResult.data.institutionType =
+          "HIGHER EDUCATION AND UNIVERSITY";
+
+        // Override document title to fixed English (not editable)
+        extractionResult.data.documentTitle =
+          "TRANSCRIPT OF SUBJECTS AND GRADES";
+
+        // Override department name to fixed English (not editable)
+        extractionResult.data.departmentName = "Academic Services";
+
+        console.log(`✅ Fixed English values applied to college transcript`);
+      }
 
       // Save OpenAI results to Firestore
       let firestoreDocId = null;
@@ -138,9 +166,10 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             filePath: req.file.path,
             status: extractionResult.success ? "processed" : "failed",
             formType: formType, // Add form type to metadata
-            studentName: extractionResult.success
-              ? cleanedData?.studentName
-              : null,
+            studentName:
+              extractionResult.success && cleanedData?.studentName
+                ? cleanedData.studentName
+                : "Unknown Student",
             createdAt: new Date().toISOString(),
             lastModifiedAt: new Date().toISOString(),
           },

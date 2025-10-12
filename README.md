@@ -61,7 +61,6 @@ The server will start on port 3001 by default (or the port specified in your .en
 | PORT | Server port (default: 3001) |
 | NODE_ENV | Environment (development/production) |
 | OPENAI_API_KEY | Your OpenAI API key |
-| USE_OPENAI_MOCK | Set to 'true' to use mock data |
 | SERVICE_ACCOUNT_KEY_PATH | Path to Firebase service account key |
 
 ## Directory Structure
@@ -70,8 +69,7 @@ The server will start on port 3001 by default (or the port specified in your .en
   - `index.js` - Main server entry point
   - `config.js` - Configuration setup
   - `auth.js` - Firebase authentication middleware
-  - `openai.js` - OpenAI client and translation functions
-  - `openai-mock.js` - Mock OpenAI responses for testing
+  - `openai-optimized.js` - OpenAI client and translation functions
   - `routes/` - API route handlers
     - `upload.js` - File upload endpoints
     - `pdf.js` - PDF generation endpoints
@@ -85,7 +83,6 @@ The server will start on port 3001 by default (or the port specified in your .en
 
 - Use `npm run dev` to start the server with nodemon for auto-reloading
 - API endpoints are protected with Firebase Authentication
-- OpenAI mock mode can be enabled to save API costs during development
 
 ## License
 

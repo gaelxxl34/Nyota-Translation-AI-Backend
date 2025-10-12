@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "start:prod": "NODE_ENV=production node src/index.js",
     "dev": "nodemon src/index.js",
-    "dev:mock": "USE_OPENAI_MOCK=true nodemon src/index.js",
+    "dev:optimized": "USE_OPTIMIZED_PROCESSING=true nodemon src/index.js",
     "register-users": "node register-users.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -30,7 +30,8 @@
     "multer": "^2.0.1",
     "openai": "^5.8.2",
     "puppeteer": "^24.11.2",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

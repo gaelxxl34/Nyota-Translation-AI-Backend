@@ -4,10 +4,6 @@
 const config = {
   // OpenAI Configuration
   openai: {
-    // Set to true to use mock OpenAI responses for testing
-    // Set to false to use real OpenAI API (requires valid API key and quota)
-    useMock: process.env.USE_OPENAI_MOCK === "true" || false,
-
     // API settings
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
     maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 4000, // Increased for larger responses
