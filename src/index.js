@@ -15,6 +15,7 @@ const stateDiplomaPdfRoutes = require("./routes/stateDiplomaPdf");
 const bachelorDiplomaPdfRoutes = require("./routes/bachelorDiplomaPdf");
 const collegeTranscriptPdfRoutes = require("./routes/collegeTranscriptPdf");
 const collegeAttestationPdfRoutes = require("./routes/collegeAttestationPdf");
+const highSchoolAttestationPdfRoutes = require("./routes/highSchoolAttestationPdf");
 const qrRoutes = require("./routes/qr");
 
 const app = express();
@@ -77,6 +78,7 @@ app.use("/api", stateDiplomaPdfRoutes);
 app.use("/api", bachelorDiplomaPdfRoutes);
 app.use("/api", collegeTranscriptPdfRoutes);
 app.use("/api", collegeAttestationPdfRoutes);
+app.use("/api", highSchoolAttestationPdfRoutes);
 app.use("/api/qr", qrRoutes); // QR code generation routes (public - no auth required)
 app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
 

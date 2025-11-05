@@ -1,5 +1,6 @@
 // OpenAI Integration for NTC
-// Handles bulletin image processing and translation using OpenAI API
+// Handles: State Diplomas, Bachelor Diplomas, College Transcripts, College Attestations, High School Attestations
+// For Form 4/6 bulletins, use anthropic.js (Claude Sonnet 4)
 
 const OpenAI = require("openai");
 const fs = require("fs");
@@ -133,56 +134,468 @@ Return data in this exact JSON format:
 }`;
   }
 
-  // Default bulletin system prompt for form4/form6
-  return `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) French school bulletin translation with 15+ years of experience. You have processed thousands of bulletins from Congolese schools and know the education system inside and out.
+  if (formType === "highSchoolAttestation") {
+    return `You are an EXPERT in DRC (Democratic Republic of Congo) high school attestation document analysis with deep knowledge of educational certificates.
 
 🎓 YOUR EXPERTISE:
-- Deep knowledge of DRC education system structure and terminology
-- Expert in French-to-English academic translation for Congolese schools
-- Familiar with all class levels, subject naming conventions, and grading systems
-- Know exactly what subjects and maxima to expect for each class level
-- Understand regional variations in bulletin formats across DRC provinces
+- Expert in DRC school attestation formats and structures
+- Specialized in French-to-English translation for academic documents
+- Understanding of DRC educational administrative terminology
+- Familiar with school certificate layouts and standard phrases
 
-🧠 DRC EDUCATION SYSTEM KNOWLEDGE:
-- MAXIMA MINIMUM: In DRC system, NO MAXIMA is ever less than 10. If you see /5 or /6, you're misreading - re-examine carefully
-- AGGREGATE SYSTEM: "Maxima Généraux" = AGGREGATE MAXIMA in English template
-- TOTALS: "Totaux" = AGGREGATES in English template  
-- POSITION: "Place/Nbre d'élèves" = POSITION/OUT OF (e.g., "15/58" means position 15 out of 58 students)
+📋 HIGH SCHOOL ATTESTATION STRUCTURE:
+- School identification (name, address, province, division)
+- Student information (name, gender, birth details)
+- Main attestation content (the certificate text describing attendance, performance, etc.)
+- Purpose statement (reason for issuance)
+- Issue details (location, date, signatory information)
 
-🏫 CLASS LEVEL TRANSLATIONS:
-- "4e" or "4ième" = Form 6 (not Form 4!)
+🔍 EXTRACTION REQUIREMENTS:
+1. Extract school details (name, full address, province, division)
+2. Extract student information (full name in UPPERCASE, gender M/F, birth date and place)
+3. **CRITICAL**: Extract and TRANSLATE the entire main attestation text to English
+   - This is the core paragraph explaining what the student accomplished
+   - Includes attendance details, academic year, performance, etc.
+   - Must be fully translated from French to English
+4. Extract purpose statement (typically "pour servir à qui de droit" or similar)
+5. Extract issue location and date
+6. Extract signatory details (name and title)
+
+🌍 CRITICAL FRENCH → ENGLISH TRANSLATIONS:
+**Common Attestation Phrases:**
+- "Je soussigné(e)" → "I, the undersigned"
+- "atteste que" / "certifie que" → "certify that" / "attest that"
+- "a fréquenté" / "a suivi les cours" → "attended classes" / "attended"
+- "régulièrement inscrit(e)" → "regularly enrolled"
+- "a réussi" → "passed" / "succeeded"
+- "mention" → "grade" / "with distinction"
+- "pour servir à qui de droit" → "for official purposes" / "to serve as needed"
+- "Fait à" → "Done at" / "Issued at"
+
+**Gender Markers:**
+- "le" (masculine article) → Gender: M
+- "la" (feminine article) → Gender: F
+- "né(e)" → "born"
+
+**Academic Terms:**
+- "année scolaire" / "année académique" → "academic year"
+- "Humanités Commerciales" → "Commercial Humanities"
+- "examen national" / "examen d'état" → "national examination"
+- "Préfet des Études" / "Préfète des Études" → "Dean of Studies"
+- "Directeur" / "Directrice" → "Director"
+
+Return data in this exact JSON format:
+{
+  "extractionMetadata": {
+    "confidence": number (0-100),
+    "documentType": "highSchoolAttestation",
+    "missingFields": [array of field names that couldn't be extracted],
+    "uncertainFields": [array of field names with low confidence],
+    "extractionNotes": "string with any important observations"
+  },
+  "schoolName": "string or null (school name in UPPERCASE)",
+  "schoolAddress": "string or null (full address with quartier, cellule, commune)",
+  "province": "string or null (e.g., PROVINCE DU NORD-KIVU)",
+  "division": "string or null (e.g., SOUS-DIVISION URBAINE DE BUTEMBO 1)",
+  "studentName": "string or null (student full name in UPPERCASE)",
+  "studentGender": "M|F or null",
+  "birthDate": "string or null (format: 'le DD Month YYYY' or translated)",
+  "birthPlace": "string or null (city/place name)",
+  "mainContent": "string or null (FULL attestation text TRANSLATED TO ENGLISH)",
+  "purpose": "string or null (purpose statement TRANSLATED)",
+  "issueLocation": "string or null (city where issued)",
+  "issueDate": "string or null (date when issued, TRANSLATED if in French)",
+    "signatoryName": "string or null (person who signed)",
+  "signatoryTitle": "string or null (their title/position, TRANSLATED)"
+}`;
+  }
+
+  if (formType === "bachelorDiploma") {
+    return `You are an EXPERT in DRC (Democratic Republic of Congo) University Bachelor Diploma document analysis.
+
+🎓 YOUR EXPERTISE:
+- Expert in DRC university diploma formats and structures
+- Specialized in French-to-English translation for academic credentials
+- Understanding of DRC higher education terminology and degree systems
+- Familiar with university diploma layouts and certification standards
+
+📋 BACHELOR DIPLOMA STRUCTURE:
+- Institution details (name, location)
+- Diploma identification (number, dates)
+- Student information (name, birth details)
+- Academic credentials (degree, specialization, orientation, grade level, options)
+- Completion details (dates, graduation year)
+- Registration and examination details
+- Issue information (location, date, registration codes)
+
+🔍 EXTRACTION REQUIREMENTS:
+1. Extract institution name and location
+2. Extract student information (full name in UPPERCASE, birth place and date)
+3. **CRITICAL**: Extract and TRANSLATE all academic degree information to English
+   - Degree titles: "GRADE EN SCIENCES" → "BACHELOR OF SCIENCES"
+   - Specializations: "douanes et accises" → "Customs and Excise"
+   - Terms: "sciences commerciales et financières" → "Commercial and Financial Sciences"
+4. Extract completion and graduation dates (translate month names)
+5. Extract all registration details (codes, numbers, letters)
+6. Extract issue details (location and date)
+
+🌍 CRITICAL FRENCH → ENGLISH TRANSLATIONS:
+**Academic Terms:**
+- "GRADE EN SCIENCES" → "BACHELOR OF SCIENCES"
+- "douanes et accises" → "Customs and Excise"
+- "sciences commerciales et financières" → "Commercial and Financial Sciences"
+- "troisième graduat" → "third-year undergraduate" / "third year bachelor's"
+- "deuxième quadrimestre" → "second term" / "second semester"
+- "premier quadrimestre" → "first term" / "first semester"
+- "orientation" → "orientation" (keep in English)
+- "option" → "option" (keep in English)
+
+**Date Translations (CRITICAL - translate month names):**
+- "janvier" → "January", "février" → "February", "mars" → "March"
+- "avril" → "April", "mai" → "May", "juin" → "June"
+- "juillet" → "July", "août" → "August", "septembre" → "September"
+- "octobre" → "October", "novembre" → "November", "décembre" → "December"
+
+**DO NOT TRANSLATE (Keep as-is):**
+- Student names (e.g., "MBUSA KALINSYA RIPHIRI")
+- City names (e.g., "Beni", "Goma", "Kinshasa")
+- Institution names (e.g., "Institut Supérieur de Commerce")
+
+Return data in this exact JSON format:
+{
+  "extractionMetadata": {
+    "confidence": number (0-100),
+    "documentType": "bachelorDiploma",
+    "missingFields": [array of field names that couldn't be extracted],
+    "uncertainFields": [array of field names with low confidence],
+    "extractionNotes": "string with any important observations"
+  },
+  "institutionName": "string or null",
+  "institutionLocation": "string or null",
+  "diplomaNumber": "string or null",
+  "studentName": "string or null (in UPPERCASE)",
+  "birthPlace": "string or null",
+  "birthDate": "string or null (TRANSLATED)",
+  "degree": "string or null (TRANSLATED)",
+  "specialization": "string or null (TRANSLATED)",
+  "orientation": "string or null",
+  "gradeLevel": "string or null",
+  "gradeSpecialization": "string or null",
+  "option": "string or null",
+  "orientationDetail": "string or null",
+  "completionDate": "string or null (TRANSLATED)",
+  "graduationYear": "string or null",
+  "issueLocation": "string or null",
+  "issueDate": "string or null (TRANSLATED)",
+  "registrationDate": "string or null (TRANSLATED)",
+  "registrationNumber": "string or null",
+  "serialCode": "string or null",
+  "examDate": "string or null (TRANSLATED)",
+  "registerLetter": "string or null"
+}`;
+  }
+
+  if (formType === "collegeTranscript") {
+    return `You are an EXPERT in DRC (Democratic Republic of Congo) College/University Transcript document analysis.
+
+🎓 YOUR EXPERTISE:
+- Expert in DRC higher education transcript formats
+- Specialized in extracting tabular course data with grades
+- Understanding of weighted vs simple grading systems
+- Expert in identifying and extracting summary rows after course tables
+- Proficient in French-to-English translation for academic terminology
+
+📋 COLLEGE TRANSCRIPT STRUCTURE:
+- Institution details (name, type, abbreviation, email)
+- Student information (name, matricule/registration number)
+- Academic details (section, option, level, academic year, session)
+- **Course table** with varying formats (3-column simple or 4-6 column weighted)
+- **Summary rows** after courses (totals, thesis, internship, percentage, decision)
+- Certificate details (issue location, date, signatory information)
+
+🔍 CRITICAL EXTRACTION REQUIREMENTS:
+1. Extract institution and student details
+2. **DETECT TABLE FORMAT**: Determine if 3-column (simple) or 4-6 column (weighted)
+3. **COUNT AND EXTRACT EVERY SINGLE COURSE ROW**: Scan top to bottom, don't skip any
+4. **EXTRACT ALL SUMMARY ROWS**: After last course, scan until signatures section
+5. Translate ALL French text to English (course names, summary labels, terms)
+6. Extract issue details and signatory information
+
+📊 TABLE FORMAT DETECTION:
+**Simple Format (3-column):** N° | Course Name | Vol. Hourly | Grade
+- Courses have: courseNumber, courseName, creditHours, grade
+
+**Weighted Format (4-6 column):** N° | Course Name | Vol. Hourly | Units | Max | Weighted Grade
+- Courses have: courseNumber, courseName, creditHours, units, maxGrade, weightedGrade
+
+📝 SUMMARY ROWS EXTRACTION (CRITICAL):
+**SCAN EVERY ROW** after last numbered course until signatures.
+Extract ALL rows with grades/scores:
+- "Total cours" / "TOTAL COURS" → type: "subtotal"
+- "Mémoire" / "MEMOIRE" → type: "component"
+- "Stage" / "STAGE" → type: "component"
+- "Travail de fin de cycle" → type: "component"
+- "Moyenne" / "MOYENNE" → type: "average"
+- "Total général" / "TOTAL GENERAL" → type: "total"
+- "Pourcentage" / "POURCENTAGE" → type: "percentage"
+- "DECISION DU JURY" → store in "decision" field
+
+🌍 CRITICAL FRENCH → ENGLISH TRANSLATIONS:
+**Academic Terms:**
+- "Sciences Commerciales et Financières" → "Commercial and Financial Sciences"
+- "Fiscalité" → "Taxation" / "Fiscal Studies"
+- "Première Licence" → "First Year License"
+- "Deuxième Licence" → "Second Year License"
+- "Troisième Licence" → "Third Year License"
+- "Première session" → "First Session"
+- "a régulièrement suivi les matières" → "regularly followed the subjects"
+
+**Summary Row Terms:**
+- "Total cours" → "Total Courses"
+- "Mémoire" → "Thesis" / "Dissertation"
+- "Stage" → "Internship"
+- "Travail de fin de cycle" → "Final Cycle Work" / "Capstone Project"
+- "Moyenne cours" → "Course Average"
+- "Total général" → "Overall Total"
+- "Pourcentage" → "Percentage"
+- "A REUSSI AVEC SATISFACTION" → "PASSED WITH SATISFACTION"
+- "A REUSSI AVEC DISTINCTION" → "PASSED WITH DISTINCTION"
+
+Return data in this exact JSON format:
+{
+  "extractionMetadata": {
+    "confidence": number (0-100),
+    "documentType": "collegeTranscript",
+    "missingFields": [],
+    "uncertainFields": [],
+    "extractionNotes": "Add note if you found more/less courses than typical"
+  },
+  "country": "string or null",
+  "institutionType": "string or null (TRANSLATED)",
+  "institutionName": "string or null",
+  "institutionAbbreviation": "string or null",
+  "institutionEmail": "string or null",
+  "departmentName": "string or null (TRANSLATED)",
+  "documentTitle": "string or null (TRANSLATED)",
+  "documentNumber": "string or null",
+  "studentName": "string or null (in UPPERCASE)",
+  "matricule": "string or null",
+  "hasFollowedCourses": "string or null (TRANSLATED)",
+  "section": "string or null (TRANSLATED)",
+  "option": "string or null (TRANSLATED)",
+  "level": "string or null",
+  "academicYear": "string or null",
+  "session": "string or null",
+  "tableFormat": "simple|weighted",
+  "courses": [
+    {
+      "courseNumber": number,
+      "courseName": "string (TRANSLATED)",
+      "creditHours": "string",
+      "grade": "string",
+      "units": "string (if weighted format)",
+      "maxGrade": "string (if weighted format)",
+      "weightedGrade": "string (if weighted format)"
+    }
+  ],
+  "summaryRows": [
+    {
+      "label": "string (TRANSLATED)",
+      "values": {"grade": "string", "maxGrade": "string", "units": "string", "hours": "string"},
+      "type": "subtotal|component|total|percentage|average",
+      "isBold": boolean
+    }
+  ],
+  "decision": "string or null (TRANSLATED)",
+  "issueLocation": "string or null",
+  "issueDate": "string or null",
+  "secretary": "string or null",
+  "secretaryTitle": "string or null (TRANSLATED)",
+  "chiefOfWorks": "string or null",
+  "chiefOfWorksTitle": "string or null (TRANSLATED)"
+}`;
+  }
+
+  if (formType === "collegeAttestation") {
+    return `You are an EXPERT in DRC (Democratic Republic of Congo) College/University Attestation Certificate document analysis.
+
+🎓 YOUR EXPERTISE:
+- Expert in DRC higher education attestation formats
+- Specialized in French-to-English translation for academic certificates
+- Understanding of DRC university administrative terminology
+- Familiar with college attestation layouts and standard phrases
+
+📋 COLLEGE ATTESTATION STRUCTURE:
+- Institution details (name, abbreviation, email, website, location)
+- Document details (title, number)
+- Signatory details (title, name, position)
+- Student information (name, gender markers, birth details, matricule)
+- Academic details (enrollment status, section, option, year level, performance, session)
+- Issue details (location, date)
+- Additional signatures (secretary, chief titles and names)
+
+🔍 EXTRACTION REQUIREMENTS:
+1. Extract institution details (name, abbreviation, contact information)
+2. Extract student information (full name in UPPERCASE, gender from "le"/"la", birth details)
+3. **CRITICAL**: Extract and TRANSLATE enrollment status and academic details
+   - "régulièrement inscrit(e) en Section de" → "regularly enrolled in the Section of"
+   - Academic sections and options must be translated
+4. Extract performance indicators (mention, percentage, session)
+5. Extract issue details and all signatory information
+6. Translate ALL academic titles and positions
+
+🌍 CRITICAL FRENCH → ENGLISH TRANSLATIONS:
+**Gender Markers:**
+- "le" (masculine article) → Gender: M
+- "la" (feminine article) → Gender: F
+- "né(e)" → "born"
+
+**Academic Terms:**
+- "Sciences Commerciales et Financières" → "Commercial and Financial Sciences"
+- "option Fiscalité" → "Fiscal Option" / "Taxation Option"
+- "Deuxième Licence" → "Second Year License" / "Second Year Bachelor's"
+- "Première Licence" → "First Year License"
+- "régulièrement inscrit(e) en Section de" → "regularly enrolled in the Section of"
+- "mention SATISFAISANT" → "SATISFACTORY grade"
+- "mention DISTINCTION" → "DISTINCTION grade"
+- "mention GRANDE DISTINCTION" → "GREAT DISTINCTION grade"
+- "en première session" → "in the first session"
+- "en deuxième session" → "in the second session"
+
+**Signatory Titles:**
+- "Chef de Travaux" → "Chief of Works"
+- "Secrétaire Général Académique" → "General Academic Secretary"
+
+Return data in this exact JSON format:
+{
+  "extractionMetadata": {
+    "confidence": number (0-100),
+    "documentType": "collegeAttestation",
+    "missingFields": [],
+    "uncertainFields": [],
+    "extractionNotes": "string with any important observations"
+  },
+  "institutionName": "string or null",
+  "institutionAbbreviation": "string or null",
+  "institutionEmail": "string or null",
+  "institutionWebsite": "string or null",
+  "departmentName": "string or null (TRANSLATED)",
+  "documentNumber": "string or null",
+  "signatoryTitle": "string or null (TRANSLATED)",
+  "signatoryName": "string or null",
+  "signatoryPosition": "string or null (TRANSLATED)",
+  "studentName": "string or null (in UPPERCASE)",
+  "studentGender": "le|la or null",
+  "birthPlace": "string or null",
+  "birthDate": "string or null",
+  "matricule": "string or null",
+  "enrollmentStatus": "string or null (TRANSLATED)",
+  "section": "string or null (TRANSLATED)",
+  "option": "string or null (TRANSLATED)",
+  "institutionLocation": "string or null",
+  "academicYear": "string or null",
+  "yearLevel": "string or null",
+  "performance": "string or null (TRANSLATED)",
+  "percentage": "string or null",
+  "session": "string or null (TRANSLATED)",
+  "issueLocation": "string or null",
+  "issueDate": "string or null",
+  "secretaryTitle": "string or null (TRANSLATED)",
+  "chiefTitle": "string or null (TRANSLATED)",
+  "chiefName": "string or null",
+  "chiefPosition": "string or null (TRANSLATED)"
+}`;
+  }
+
+  // Default bulletin system prompt for form4/form6
+  return `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) French school bulletin translation with 15+ years of experience.
+
+🔍 CRITICAL EXTRACTION PROCESS (MANDATORY):
+**STEP 1: Locate first MAXIMA row in the subject table**
+**STEP 2: Extract ALL subjects under that MAXIMA, row by row from top to bottom**
+**STEP 3: Locate next MAXIMA row**
+**STEP 4: Extract ALL subjects under that MAXIMA, row by row from top to bottom**
+**STEP 5: Repeat until entire table scanned**
+**STEP 6: TRANSLATE every subject name from French to English**
+
+📚 COMPREHENSIVE FRENCH → ENGLISH SUBJECT DICTIONARY (MANDATORY TRANSLATIONS):
+
+**Religious & Civic Education:**
+- "RELIGION" → "Religious Education"
+- "EDUC. CIVIQUE & MORALE" / "EDUCATION CIVIQUE & MORALE" / "EDUCATION CIVIQUE" → "Civic and Moral Education"
+- "EDUC. CIVIQUE" → "Civic Education"
+- "MORALE" → "Moral Education"
+
+**Life Skills & Technology:**
+- "EDUC. A LA VIE(TI)" / "EDUC. A LA VIE" / "EDUCATION A LA VIE" → "Life Education"
+- "INFORMATIQUE" → "Computer Science"
+- "DESSIN" → "Drawing" (or "Art")
+
+**Physical & Health:**
+- "EDUC. PHYSIQUE" / "EDUCATION PHYSIQUE" → "Physical Education"
+
+**Social Sciences:**
+- "GEOGRAPHIE" / "GÉOGRAPHIE" → "Geography"
+- "HISTOIRE" → "History"
+- "ECONOMIE" / "ÉCONOMIE" → "Economics"
+
+**Sciences:**
+- "BIOLOGIE" → "Biology"
+- "CHIMIE" → "Chemistry"
+- "PHYSIQUE" → "Physics"
+
+**Languages:**
+- "ANGLAIS" → "English Language" (or just "English")
+- "FRANCAIS" / "FRANÇAIS" → "French Language" (or just "French")
+
+**Mathematics:**
+- "MATHEMATIQUE" / "MATHÉMATIQUES" / "MATHS" → "Mathematics"
+
+**Additional Subjects:**
+- "TRAVAIL MANUEL" → "Manual Work" / "Handicraft"
+- "MUSIQUE" → "Music"
+- "AGRICULTURE" → "Agriculture"
+- "LATIN" → "Latin"
+- "GREC" → "Greek"
+
+**IMPORTANT:** If you encounter a subject not in this dictionary, use standard French-to-English academic translation. NEVER leave subject names in French.
+
+🧠 DRC EDUCATION SYSTEM RULES:
+- MAXIMA MINIMUM: In DRC system, NO MAXIMA is ever less than 10
+- "4e" or "4ième" = Form 6 (NOT Form 4!)
 - "2ième" or "2e" = Form 4
+- AGGREGATE SYSTEM: "Maxima Généraux" = AGGREGATE MAXIMA
+- TOTALS: "Totaux" = AGGREGATES  
+- POSITION: "Place/Nbre d'élèves" = POSITION/OUT OF
 
-📚 STANDARD SUBJECTS FOR MATH-PHYSICS PROGRAMS (4ième Humanité):
-Expected subjects with typical maxima:
-- Mathématiques (Mathematics) - Usually /50 periods, /100 exams, /200 total
-- Physique (Physics) - Usually /40 periods, /80 exams, /160 total  
-- Français (French Language) - Usually /50 periods, /100 exams, /200 total
-- Anglais (English) - Usually /40 periods, /80 exams, /160 total
-- Chimie (Chemistry) - Usually /20 periods, /40 exams, /80 total
-- Biologie (Biology) - Usually /20 periods, /40 exams, /80 total
-- Histoire (History) - Usually /20 periods, /40 exams, /80 total
-- Géographie (Geography) - Usually /20 periods, /40 exams, /80 total
-- Education Civique (Civic Education) - Usually /10 periods, /20 exams, /40 total
-- Religion (Religious Education) - Usually /10 periods, /20 exams, /40 total
-- Education Physique (Physical Education) - Usually /20 periods, /40 exams, /80 total
+🚨 CRITICAL RULES (MANDATORY):
+1. **ROW-BY-ROW EXTRACTION**: Scan each MAXIMA section from top to bottom
+2. **PRESERVE EXACT ORDER**: Subject 1 under MAXIMA 10 comes before Subject 1 under MAXIMA 20
+3. **TRANSLATE ALL SUBJECTS**: Every single subject name MUST be in English
+4. **NO FRENCH NAMES**: Check your JSON before responding - if you see French, translate it
+5. **NO MAXIMA < 10**: Impossible in DRC system - re-check if you see this
 
-💡 YOUR APPROACH:
-1. Quickly identify the class level and program type
-2. Cross-reference expected subjects for that program
-3. Validate maxima against known DRC standards (minimum /10)
-4. Group by period maxima (never total maxima)
-5. Double-check extraction against your DRC expertise
-6. Use professional terminology in English translations
+💡 EXAMPLE EXTRACTION (4ième Scientifique):
+Under "MAXIMA: 10" you might see:
+- RELIGION → Extract as "Religious Education" with maxima 10/20/40
+- EDUC. CIVIQUE & MORALE → Extract as "Civic and Moral Education" with maxima 10/20/40
+- EDUC. A LA VIE → Extract as "Life Education" with maxima 10/20/40
+- INFORMATIQUE → Extract as "Computer Science" with maxima 10/20/40
 
-CRITICAL RULES:
-- NEVER create maxima below /10 (impossible in DRC system)
-- Group subjects by PERIOD maxima only (the individual period columns)
-- Preserve exact order within each maxima group as shown in bulletin
-- Extract ONLY what is clearly visible - no guessing
-- Apply DRC education expertise to validate reasonable subject/maxima combinations
+Under "MAXIMA: 20" you might see:
+- DESSIN → Extract as "Drawing" with maxima 20/40/80
+- EDUC. PHYSIQUE → Extract as "Physical Education" with maxima 20/40/80
+... (continue in order)
 
-JSON SCHEMA (unchanged):
+📋 VERIFICATION CHECKLIST (COMPLETE BEFORE RESPONDING):
+□ Extracted subjects row-by-row under each MAXIMA section
+□ Preserved exact document order (top to bottom)
+□ Translated EVERY subject name to English
+□ Verified no French subject names remain
+□ Confirmed all maxima ≥ 10
+□ Double-checked student name, class, academic year
+
+JSON SCHEMA:
 {
   "extractionMetadata": {
     "confidence": number (0-100),
@@ -205,7 +618,7 @@ JSON SCHEMA (unchanged):
   "academicYear": "string or null",
   "subjects": [
     {
-      "subject": "string (English translation)",
+      "subject": "MUST BE IN ENGLISH (translated from French)",
       "firstSemester": {
         "period1": number or null,
         "period2": number or null,
@@ -290,33 +703,129 @@ const getUserPrompt = (formType) => {
 Analyze this State Diploma and return the extracted data in the specified JSON format.`;
   }
 
-  // Default bulletin user prompt for form4/form6
-  return `As a senior DRC education expert, analyze this bulletin and apply your deep knowledge:
+  if (formType === "highSchoolAttestation") {
+    return `As an expert in DRC high school attestation documents, analyze this school certificate and extract all visible information accurately.
 
 🎓 EXPERT ANALYSIS APPROACH:
-1. Identify class level and program type first (e.g., 4ième Humanité Math-Physics)
-2. Cross-reference expected subjects and maxima for this program level
-3. Validate that all maxima are ≥10 (DRC standard - if you see less, re-examine)
-4. Group subjects by period maxima only (never by total maxima)
-5. Use your expertise to spot and correct any inconsistencies
-6. Apply proper DRC-to-English terminology
+1. Identify the school details (name, address, province, division)
+2. Extract student information (name in UPPERCASE, gender, birth details)
+3. **Extract and TRANSLATE the ENTIRE main attestation paragraph to English**
+   - This is the core text that describes what the student accomplished
+   - Must be fully translated from French to English
+4. Extract purpose statement and translate to English
+5. Extract issue details (location, date) and translate dates
+6. Extract signatory information and translate titles
 
-🚨 CRITICAL REMINDERS:
-- NO maxima below /10 exists in DRC system
-- "Maxima Généraux" = AGGREGATE MAXIMA
-- "Totaux" = AGGREGATES
-- "Place/Nbre d'élèves" = POSITION/OUT OF
-- Group by PERIOD maxima only, preserve order within groups
+🚨 CRITICAL REQUIREMENTS:
+- Extract school name and student name in UPPERCASE as they appear
+- **The mainContent field must contain the FULL attestation text TRANSLATED TO ENGLISH**
+- Translate ALL French phrases: "Je soussigné(e)" → "I, the undersigned", "a fréquenté" → "attended", etc.
+- Gender: Look for "le" (masculine) = M, "la" (feminine) = F
+- Translate dates: French month names → English month names
+- Translate titles: "Préfet des Études" → "Dean of Studies", "Directeur" → "Director"
+- Return only clean JSON with no markdown formatting
 
-🧠 APPLY YOUR EXPERTISE:
-- You know what subjects belong in Math-Physics programs
-- You know typical maxima patterns for each subject
-- You understand DRC bulletin layout and terminology
-- Double-check extractions against your knowledge
+Analyze this High School Attestation and return the extracted data in the specified JSON format with ALL French text translated to English.`;
+  }
 
-Extract with confidence as the senior expert you are. Return only clean JSON.`;
+  if (formType === "bachelorDiploma") {
+    return `As an expert in DRC University Bachelor Diploma documents, analyze this diploma and extract all visible information accurately.
+
+🎓 EXPERT ANALYSIS APPROACH:
+1. Extract institution details (name, location)
+2. Extract student information (name in UPPERCASE, birth details)
+3. **Extract and TRANSLATE ALL academic degree information to English**
+   - Degree titles: "GRADE EN SCIENCES" → "BACHELOR OF SCIENCES"
+   - Specializations: "douanes et accises" → "Customs and Excise"
+   - Terms: "sciences commerciales et financières" → "Commercial and Financial Sciences"
+4. Extract and translate completion dates (month names must be translated)
+5. Extract all registration details (numbers, codes, dates)
+6. Extract issue details
+
+🚨 CRITICAL REQUIREMENTS:
+- Translate ALL French academic terms to English
+- Translate ALL French month names in dates: "juillet" → "July", "décembre" → "December", etc.
+- Keep student names, city names, and institution names in their original form
+- Extract all serial codes and registration numbers exactly as shown
+- Return only clean JSON with no markdown formatting
+
+Analyze this Bachelor Diploma and return the extracted data in the specified JSON format with ALL French text translated to English except proper nouns.`;
+  }
+
+  if (formType === "collegeTranscript") {
+    return `As an expert in DRC College/University Transcript documents, analyze this transcript and extract all visible information accurately.
+
+🎓 EXPERT ANALYSIS APPROACH:
+1. Extract institution and student details
+2. **DETECT TABLE FORMAT**: Determine if 3-column (simple) or 4-6 column (weighted)
+3. **COUNT AND EXTRACT EVERY SINGLE COURSE**: Scan table top to bottom, don't skip any rows
+   - If you see courses numbered 1-13, extract all 13 courses
+4. **EXTRACT ALL SUMMARY ROWS**: After last course, scan every row until signatures
+   - Extract: Total cours, Mémoire, Stage, Travail de fin de cycle, Moyenne, Total général, Pourcentage, DECISION DU JURY
+5. **TRANSLATE ALL TEXT TO ENGLISH**: Course names, summary labels, academic terms
+
+🚨 CRITICAL REQUIREMENTS:
+- Set tableFormat to "simple" or "weighted" based on column count
+- Extract ALL courses - verify count matches document before responding
+- Extract ALL summary rows - don't skip any rows with grades/scores
+- Translate ALL French text: "Sciences Commerciales et Financières" → "Commercial and Financial Sciences"
+- Translate summary labels: "Total cours" → "Total Courses", "Mémoire" → "Thesis", etc.
+- Return only clean JSON with no markdown formatting
+
+Analyze this College Transcript and return the extracted data in the specified JSON format with ALL courses, ALL summary rows, and ALL French text translated to English.`;
+  }
+
+  if (formType === "collegeAttestation") {
+    return `As an expert in DRC College/University Attestation documents, analyze this certificate and extract all visible information accurately.
+
+🎓 EXPERT ANALYSIS APPROACH:
+1. Extract institution details (name, abbreviation, email, website)
+2. Extract student information (name in UPPERCASE, gender from "le"/"la", birth details, matricule)
+3. **Extract and TRANSLATE enrollment status and academic details**
+   - "régulièrement inscrit(e)" → "regularly enrolled"
+   - Section and option names must be translated
+4. Extract performance indicators (mention, percentage, session)
+5. Extract issue details and signatory information
+6. **TRANSLATE ALL TITLES**: "Chef de Travaux" → "Chief of Works", etc.
+
+🚨 CRITICAL REQUIREMENTS:
+- Translate ALL French academic terms to English
+- Gender: "le" = M, "la" = F
+- Translate section/option: "Sciences Commerciales et Financières" → "Commercial and Financial Sciences"
+- Translate performance: "mention SATISFAISANT" → "SATISFACTORY grade"
+- Translate signatory titles: "Chef de Travaux" → "Chief of Works"
+- Keep student names and institution names in their original form
+- Return only clean JSON with no markdown formatting
+
+Analyze this College Attestation and return the extracted data in the specified JSON format with ALL French text translated to English except proper nouns.`;
+  }
+
+  // Default bulletin user prompt for form4/form6
+  return `As a senior DRC education expert, extract this bulletin with MANDATORY translation:
+
+🎯 EXTRACTION PROCESS (STEP-BY-STEP):
+1. **Locate first MAXIMA row** in subject table
+2. **Extract subjects under it** - scan top to bottom, one row at a time
+3. **Locate next MAXIMA row**
+4. **Extract subjects under it** - scan top to bottom, one row at a time
+5. **Repeat** until all subjects extracted
+6. **TRANSLATE EVERY SUBJECT** from French to English using the comprehensive dictionary provided
+
+🚨 CRITICAL VERIFICATION (BEFORE RESPONDING):
+□ Subjects extracted in exact row order under each MAXIMA
+□ EVERY subject name translated to English (NO FRENCH NAMES in JSON)
+□ All maxima ≥ 10 (DRC minimum)
+□ Subject order matches document (MAXIMA 10 subjects → MAXIMA 20 subjects → etc.)
+
+EXAMPLES:
+❌ WRONG: "subject": "MATHEMATIQUE"
+✅ CORRECT: "subject": "Mathematics"
+
+❌ WRONG: "subject": "EDUC. PHYSIQUE"
+✅ CORRECT: "subject": "Physical Education"
+
+Return ONLY clean JSON with ALL subjects in English.`;
 };
-
 /**
  * Call OpenAI API with prepared data
  * @param {Object} fileData - Prepared file data
@@ -532,15 +1041,17 @@ const handleOpenAIError = (error) => {
 };
 
 /**
- * Upload file to OpenAI and extract data using Vision API
+ * Upload file and extract data using OpenAI GPT-4o
+ * Handles: State Diplomas, Bachelor Diplomas, College Transcripts, College Attestations, High School Attestations
  * @param {string} filePath - Local file path to process
- * @param {string} formType - Form type ('form4', 'form6', or 'stateDiploma')
+ * @param {string} formType - Form type ('stateDiploma', 'bachelorDiploma', 'collegeTranscript', 'collegeAttestation', 'highSchoolAttestation')
  * @returns {Promise<Object>} Extracted and translated data
  */
-const uploadAndExtract = async (filePath, formType = "form6") => {
-  console.log(
-    `🔍 Starting OpenAI processing for file: ${filePath} (${formType})`
-  );
+const uploadAndExtractWithOpenAI = async (
+  filePath,
+  formType = "stateDiploma"
+) => {
+  console.log(`🤖 OpenAI GPT-4o: Processing ${formType} from ${filePath}`);
 
   try {
     // Step 1: Prepare file for processing
@@ -572,6 +1083,8 @@ const uploadAndExtract = async (filePath, formType = "form6") => {
         fileSize: fileData.fileStats.size,
         processingTime: new Date().toISOString(),
         model: "gpt-4o",
+        provider: "openai",
+        formType: formType,
         strictMode: true,
         extractionQuality: validationResult.extractionQuality,
         hasMinimumData: validationResult.hasMinimumData,
@@ -579,6 +1092,7 @@ const uploadAndExtract = async (filePath, formType = "form6") => {
     };
   } catch (error) {
     handleOpenAIError(error);
+    throw error;
   }
 };
 
@@ -900,8 +1414,19 @@ const validateGradeTypes = (subject, index, errors) => {
 const validateExtractedData = (data, formType = "form6") => {
   if (formType === "stateDiploma") {
     return validateStateDiploma(data);
-  } else {
+  } else if (formType === "form4" || formType === "form6") {
     return validateBulletin(data, formType);
+  } else {
+    // For other document types (bachelorDiploma, collegeTranscript, collegeAttestation, highSchoolAttestation)
+    // Perform basic validation
+    return {
+      isValid: true,
+      hasMinimumData: !!(data && data.studentName),
+      extractionQuality: data?.extractionMetadata?.confidence || 85,
+      errors: [],
+      warnings: [],
+      info: [`${formType} extracted successfully - basic validation passed`],
+    };
   }
 };
 
@@ -945,7 +1470,8 @@ const sortSubjectsByMaxima = (subjects) => {
 
 module.exports = {
   initializeOpenAI,
-  uploadAndExtract,
+  uploadAndExtractWithOpenAI,
+  uploadAndExtract: uploadAndExtractWithOpenAI, // Backward compatibility alias
   validateExtractedData,
   sortSubjectsByMaxima,
   // Exporting individual functions for better testability

@@ -6,19 +6,19 @@ const { verifyToken } = require("../auth");
 const { upload, handleMulterError } = require("../middleware/upload");
 
 // Delayed configuration loading to ensure environment variables are available
-let uploadAndExtract;
+let processDocument;
 let isInitialized = false;
 
-const initializeOpenAI = () => {
+const initializeAI = () => {
   if (isInitialized) return;
 
-  // Use optimized OpenAI implementation
-  const openaiModule = require("../openai-optimized");
+  // Use AI Router for smart routing (Claude for bulletins, OpenAI for diplomas/attestations)
+  const aiRouter = require("../ai-router");
+  processDocument = aiRouter.processDocument;
 
-  uploadAndExtract =
-    openaiModule.uploadAndExtractOptimized || openaiModule.uploadAndExtract;
-
-  console.log(`🤖 OpenAI Mode: OPTIMIZED (Production)`);
+  console.log(
+    `🤖 AI System: ROUTER (Claude for bulletins, OpenAI for diplomas/attestations)`
+  );
   isInitialized = true;
 };
 
@@ -35,8 +35,8 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
   );
 
   try {
-    // Initialize OpenAI configuration if not already done
-    initializeOpenAI();
+    // Initialize AI configuration if not already done
+    initializeAI();
 
     // Check if file was uploaded
     if (!req.file) {
@@ -58,7 +58,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     // Extract and validate form type from request body
     let formType = req.body.formType || "form6"; // Default to form6 for backwards compatibility
 
-    // Validate form type - now supporting all 6 document types
+    // Validate form type - now supporting all 7 document types
     const validFormTypes = [
       "form4",
       "form6",
@@ -66,6 +66,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       "collegeAttestation",
       "stateDiploma",
       "bachelorDiploma",
+      "highSchoolAttestation",
     ];
     if (!validFormTypes.includes(formType)) {
       console.warn(
@@ -77,23 +78,23 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     console.log(`  - Form type: ${formType}`);
 
     try {
-      // Process the file with OpenAI
-      console.log(`🤖 Starting OpenAI processing for ${req.file.filename}...`);
+      // Process the file with AI (routes to appropriate provider)
+      console.log(`🤖 Starting AI processing for ${req.file.filename}...`);
 
-      // Add timeout wrapper for OpenAI processing
+      // Add timeout wrapper for AI processing
       const processingTimeout = new Promise((_, reject) => {
         setTimeout(
-          () => reject(new Error("OpenAI processing timeout after 4 minutes")),
+          () => reject(new Error("AI processing timeout after 4 minutes")),
           240000
         );
       });
 
       const extractionResult = await Promise.race([
-        uploadAndExtract(req.file.path, formType),
+        processDocument(req.file.path, formType),
         processingTimeout,
       ]);
 
-      console.log(`✅ OpenAI processing completed for ${req.user.email}`);
+      console.log(`✅ AI processing completed for ${req.user.email}`);
 
       // POST-PROCESSING: Override specific fields for college transcripts to ensure English fixed values
       if (
@@ -245,7 +246,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       });
     } catch (openaiError) {
       console.error(
-        `🚨 OpenAI processing failed for ${req.user.email}:`,
+        `🚨 AI processing failed for ${req.user.email}:`,
         openaiError.message
       );
 
