@@ -23,6 +23,13 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
       data: attestationData,
       documentId,
       frontendUrl = config.frontend?.url || "http://localhost:5173",
+      waitForImages = false, // Wait for images including QR codes
+      pdfOptions = {
+        format: "A4",
+        landscape: true,
+        printBackground: true,
+        margin: { top: "5mm", right: "5mm", bottom: "5mm", left: "5mm" },
+      },
     } = req.body;
 
     if (!attestationData) {
@@ -89,10 +96,13 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
     await page.evaluate(
       (data, docId) => {
         window.isPdfGenerationMode = true;
-        // Add formType to ensure CardOnlyPage renders the correct template
+        // Add formType and documentId to ensure CardOnlyPage renders the correct template with QR code
         window.pdfAttestationData = {
           ...data,
           formType: "stateExamAttestation",
+          documentId: docId,
+          firestoreId: docId,
+          id: docId,
         };
         window.documentId = docId;
 
@@ -102,10 +112,13 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
             detail: {
               ...data,
               formType: "stateExamAttestation",
+              documentId: docId,
+              firestoreId: docId,
+              id: docId,
             },
           })
         );
-        console.log("✅ Attestation data injected and event dispatched");
+        console.log("✅ Attestation data injected with documentId:", docId);
       },
       attestationData,
       documentId
@@ -132,38 +145,56 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
 
     console.log("✅ Template content has loaded successfully");
 
-    // Wait for QR codes to load (CRITICAL for including QR in PDF)
-    console.log("⏳ Waiting for QR codes to load...");
-    await page.waitForFunction(
-      () => {
-        const qrImages = Array.from(
-          document.querySelectorAll(
-            '.qr-container img, [data-print-element="qr-image"]'
-          )
-        );
+    // Wait for images including QR codes if requested
+    if (waitForImages) {
+      console.log("⏳ Waiting for all images (including QR codes) to load...");
 
-        if (qrImages.length === 0) {
-          console.log("⚠️ No QR code images found yet");
-          return false;
-        }
+      await page.waitForFunction(
+        () => {
+          const images = Array.from(document.querySelectorAll("img"));
+          const qrImages = Array.from(
+            document.querySelectorAll(
+              '.qr-container img, [data-print-element="qr-image"]'
+            )
+          );
 
-        console.log(`🔍 Found ${qrImages.length} QR code images`);
+          console.log(
+            `Found ${images.length} total images, ${qrImages.length} QR images`
+          );
 
-        const allQRLoaded = qrImages.every((img) => {
-          const isLoaded = img.complete && img.naturalWidth > 0;
-          if (!isLoaded) {
-            console.log("⏳ Waiting for QR code:", img.src?.substring(0, 50));
-          }
-          return isLoaded;
-        });
+          // Check if all images are loaded
+          const allImagesLoaded = images.every((img) => {
+            if (img.complete && img.naturalHeight !== 0) {
+              return true;
+            }
+            console.log("Waiting for image:", img.src || img.alt || "unknown");
+            return false;
+          });
 
-        console.log(`QR codes loaded: ${allQRLoaded}`);
-        return allQRLoaded;
-      },
-      { timeout: 15000, polling: 500 }
-    );
+          // Special check for QR codes - only required if they exist
+          const qrCodesLoaded =
+            qrImages.length === 0 ||
+            qrImages.every((img) => {
+              const loaded = img.complete && img.naturalHeight !== 0;
+              if (!loaded) {
+                console.log(
+                  "Waiting for QR code:",
+                  img.src ? img.src.substring(0, 50) : "unknown"
+                );
+              }
+              return loaded;
+            });
 
-    console.log("✅ All QR codes have loaded successfully");
+          console.log(
+            `Images loaded: ${allImagesLoaded}, QR codes loaded: ${qrCodesLoaded}`
+          );
+          return allImagesLoaded && qrCodesLoaded;
+        },
+        { timeout: 15000, polling: 1000 }
+      );
+
+      console.log("✅ All images (including QR codes) have loaded");
+    }
 
     // Wait for fonts and images
     await page.evaluate(() => document.fonts.ready);
@@ -256,18 +287,10 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
 
     // Generate PDF with landscape orientation
     console.log("📄 Generating PDF with landscape orientation...");
+    console.log("📄 PDF options:", pdfOptions);
+
     const pdfBuffer = await page.pdf({
-      format: "A4",
-      landscape: true,
-      printBackground: true,
-      margin: {
-        top: "5mm",
-        bottom: "5mm",
-        left: "5mm",
-        right: "5mm",
-      },
-      preferCSSPageSize: false,
-      scale: 0.9,
+      ...pdfOptions,
       omitBackground: false,
     });
 
