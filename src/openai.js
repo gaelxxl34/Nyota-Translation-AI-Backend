@@ -101,10 +101,50 @@ const getSystemPrompt = (formType) => {
 
 🔍 EXTRACTION REQUIREMENTS:
 1. Extract all visible text fields accurately
-2. Translate French text to appropriate English equivalents
-3. Preserve exact formatting for dates and numbers
-4. Identify certificate serial numbers and codes
-5. Extract percentage scores and grade classifications
+2. **TRANSLATE ALL French text to English:**
+   - Section names: "TECHNIQUE" → "TECHNICAL", "SCIENTIFIQUE" → "SCIENTIFIC"
+   - Option names: "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+   - Date formats: "janvier" → "January", "juin" → "June", etc.
+   - Percentage text: "cinquante-six" → "fifty-six"
+3. Preserve exact numeric values for dates and percentages
+4. Identify certificate serial numbers and codes exactly as shown
+5. Extract percentage scores with % symbol
+
+🌍 CRITICAL FRENCH → ENGLISH TRANSLATIONS:
+**Section Names:**
+- "TECHNIQUE" → "TECHNICAL"
+- "SCIENTIFIQUE" → "SCIENTIFIC"  
+- "PÉDAGOGIQUE" → "PEDAGOGICAL"
+- "LITTÉRAIRE" → "LITERARY"
+- "COMMERCIALE" → "COMMERCIAL"
+
+**Option Names:**
+- "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+- "COUPE ET COUTURE" → "CUTTING AND SEWING"
+- "ÉLECTRONIQUE" → "ELECTRONICS"
+- "CONSTRUCTION" → "CONSTRUCTION"
+- "MÉCANIQUE GÉNÉRALE" → "GENERAL MECHANICS"
+- "ÉLECTRICITÉ" → "ELECTRICITY"
+- "BIOLOGIE-CHIMIE" → "BIOLOGY-CHEMISTRY"
+- "MATH-PHYSIQUE" → "MATH-PHYSICS"
+- "LATIN-PHILOSOPHIE" → "LATIN-PHILOSOPHY"
+
+**Date Translations (months):**
+- "janvier" → "January", "février" → "February", "mars" → "March"
+- "avril" → "April", "mai" → "May", "juin" → "June"
+- "juillet" → "July", "août" → "August", "septembre" → "September"
+- "octobre" → "October", "novembre" → "November", "décembre" → "December"
+
+**Percentage Text Translations:**
+- "cinquante-six" → "fifty-six"
+- "soixante" → "sixty"
+- "soixante-dix" → "seventy"
+- "quatre-vingts" → "eighty"
+- etc.
+
+**DO NOT TRANSLATE:**
+- Student names (keep as-is)
+- City names (Kinshasa, Goma, Beni, etc.)
 
 Return data in this exact JSON format:
 {
@@ -131,6 +171,121 @@ Return data in this exact JSON format:
   "issueDate": "string or null",
   "serialNumbers": ["array of individual characters/numbers"],
   "serialCode": "string or null"
+}`;
+  }
+
+  if (formType === "stateExamAttestation") {
+    return `You are an EXPERT in DRC (Democratic Republic of Congo) State Examination Provisional Pass Certificate document analysis.
+
+🎓 YOUR EXPERTISE:
+- Expert in DRC State Examination provisional certificate formats
+- Specialized in French-to-English translation for official exam documents
+- Understanding of DRC examination system and terminology
+- Familiar with provisional pass certificate layouts and legal language
+
+📋 STATE EXAM ATTESTATION STRUCTURE:
+- Header: Ministry details and document title
+- Attestation number
+- Inspector details
+- Student information (name, birth details)
+- School information (name, code)
+- Examination session and results
+- Section and option details
+- Pass percentage
+- Issue details (place, date, validity period)
+
+🔍 EXTRACTION REQUIREMENTS:
+1. Extract attestation number (format: N°000000000/YYYY)
+2. Extract student information (full name in UPPERCASE, birth place and date)
+3. **CRITICAL**: Extract and TRANSLATE all academic information to English
+   - Section names: "TECHNIQUE" → "TECHNICAL"
+   - Options: "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+4. Extract school name and code
+5. Extract examination session year
+6. Extract percentage score (number only, no %)
+7. Extract issue details and validity period
+8. Extract inspector name
+
+🌍 CRITICAL FRENCH → ENGLISH TRANSLATIONS:
+**Common Phrases:**
+- "Je soussigné" → "I, the undersigned"
+- "Inspecteur Général" → "Inspector General"
+- "certifie que" → "certify that"
+- "le(la) nommé(e)" → "the named"
+- "né(e) à" → "born in"
+- "finaliste à (au) (de)" → "finalist at (from) (of)"
+- "a réussi à l'examen d'état" → "passed the state examination"
+- "session" → "session"
+- "Section" → "Section"
+- "Option" → "Option"
+- "avec" → "with"
+- "des points" → "of the points"
+- "déclaré(e) apte" → "declared fit"
+- "poursuivre des études supérieures" → "pursue higher studies"
+- "études universitaires" → "university studies"
+- "République Démocratique du Congo" → "Democratic Republic of the Congo"
+- "à l'étranger" → "abroad"
+- "Délivré sincèrement et exactement" → "Delivered sincerely and exactly"
+- "Valable jusqu'au" → "Valid until"
+
+**Section Translations:**
+- "TECHNIQUE" → "TECHNICAL"
+- "SCIENTIFIQUE" → "SCIENTIFIC"
+- "PÉDAGOGIQUE" → "PEDAGOGICAL"
+- "LITTÉRAIRE" → "LITERARY"
+
+**Option Translations:**
+- "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+- "COUPE ET COUTURE" → "CUTTING AND SEWING"
+- "ÉLECTRONIQUE" → "ELECTRONICS"
+- "CONSTRUCTION" → "CONSTRUCTION"
+
+**Date Translations:**
+- "janvier" → "January", "février" → "February", "mars" → "March"
+- "avril" → "April", "mai" → "May", "juin" → "June"
+- "juillet" → "July", "août" → "August", "septembre" → "September"
+- "octobre" → "October", "novembre" → "November", "décembre" → "December"
+
+**DO NOT TRANSLATE (Keep as-is):**
+- Student names
+- School names
+- City names (Kinshasa, Goma, Beni, etc.)
+
+Return data in this exact JSON format:
+{
+  "extractionMetadata": {
+    "confidence": number (0-100),
+    "documentType": "stateExamAttestation",
+    "missingFields": [array of field names that couldn't be extracted],
+    "uncertainFields": [array of field names with low confidence],
+    "extractionNotes": "string with any important observations"
+  },
+  "attestationNumber": "string or null",
+  "studentName": "string or null (in UPPERCASE)",
+  "birthPlace": "string or null",
+  "birthDate": {
+    "day": "string or null",
+    "month": "string or null",
+    "year": "string or null"
+  },
+  "schoolName": "string or null",
+  "schoolCode": "string or null",
+  "examSession": "string or null (year)",
+  "section": "string or null (TRANSLATED)",
+  "option": "string or null (TRANSLATED)",
+  "percentage": "string or null (number only, no %)",
+  "issuePlace": "string or null",
+  "issueDate": {
+    "day": "string or null",
+    "month": "string or null",
+    "year": "string or null"
+  },
+  "validUntil": {
+    "day": "string or null",
+    "month": "string or null",
+    "year": "string or null"
+  },
+  "inspectorName": "string or null"
 }`;
   }
 
@@ -686,21 +841,92 @@ const getUserPrompt = (formType) => {
     return `As a senior DRC State Diploma expert, analyze this official State Examination Certificate and extract all visible information accurately.
 
 🎓 EXPERT ANALYSIS APPROACH:
-1. Identify the document as a DRC State Examination Certificate
+1. Identify the document as a DRC State Examination Certificate  
 2. Extract student personal information (name, gender, birth details)
-3. Extract examination details (session, section, option)
-4. Extract scores and grades (percentage, grade classification)
-5. Extract certificate details (issue date, serial numbers, codes)
-6. Translate all French terms to appropriate English equivalents
+3. **TRANSLATE ALL French text to English:**
+   - Section: "TECHNIQUE" → "TECHNICAL", "SCIENTIFIQUE" → "SCIENTIFIC"
+   - Option: "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+   - Dates: "juin" → "June", "janvier" → "January"
+   - Percentage text: "cinquante-six" → "fifty-six"
+4. Extract examination session year
+5. Extract scores with % symbol (e.g., "56%")
+6. Extract certificate serial numbers and codes
 
-🚨 CRITICAL REQUIREMENTS:
-- Extract ONLY what is clearly visible - no guessing
-- Preserve exact formatting for important fields
-- Serial numbers should be extracted as individual characters
-- Translate section/option names appropriately
-- Return only clean JSON with no markdown formatting
+🚨 CRITICAL TRANSLATION REQUIREMENTS:
+- **Section names MUST be in English:** 
+  "TECHNIQUE" → "TECHNICAL"
+  "SCIENTIFIQUE" → "SCIENTIFIC"
+  "PÉDAGOGIQUE" → "PEDAGOGICAL"
+  "LITTÉRAIRE" → "LITERARY"
 
-Analyze this State Diploma and return the extracted data in the specified JSON format.`;
+- **Option names MUST be in English:**
+  "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+  "COUPE ET COUTURE" → "CUTTING AND SEWING"
+  "ÉLECTRONIQUE" → "ELECTRONICS"
+  "CONSTRUCTION" → "CONSTRUCTION"
+
+- **Date months MUST be in English:**
+  "janvier" → "January", "février" → "February", "mars" → "March"
+  "avril" → "April", "mai" → "May", "juin" → "June"
+  "juillet" → "July", "août" → "August", "septembre" → "September"
+  "octobre" → "October", "novembre" → "November", "décembre" → "December"
+
+- **Percentage text (words) MUST be in English:**
+  "cinquante-six" → "fifty-six"
+  "soixante" → "sixty"
+
+- **Keep as-is (DO NOT translate):**
+  Student names, city names (Kinshasa, Goma, Beni)
+
+- Extract serial numbers as individual characters/digits
+- Return ONLY clean JSON with NO markdown formatting
+
+Analyze this State Diploma and return the extracted data in the specified JSON format with ALL French text translated to English.`;
+  }
+
+  if (formType === "stateExamAttestation") {
+    return `As an expert in DRC State Examination Provisional Pass Certificate documents, analyze this certificate and extract all visible information accurately.
+
+🎓 EXPERT ANALYSIS APPROACH:
+1. Identify this as a DRC "EXAMEN D'ÉTAT - ATTESTATION PROVISOIRE DE RÉUSSITE" document
+2. Extract the attestation number (format: N°000000000/YYYY)
+3. Extract inspector name from "JE SOUSSIGNÉ" section
+4. Extract student information (name, birth place, birth date)
+5. Extract school information (name, 12-digit code)
+6. Extract examination session year
+7. Extract section and option names - **MUST TRANSLATE TO ENGLISH**
+8. Extract percentage score (number only, without % symbol)
+9. Extract issue place and dates (issue date and valid until date)
+
+🚨 CRITICAL REQUIREMENTS - READ CAREFULLY:
+- This is an "ATTESTATION PROVISOIRE" (Provisional Pass Certificate), NOT a diploma
+- Extract ONLY what is clearly visible in this specific document
+- **TRANSLATE section and option names to English:**
+  - "TECHNIQUE" → "TECHNICAL"
+  - "COMMERCIALE ET GESTION" → "COMMERCIAL AND MANAGEMENT"
+  - "SCIENTIFIQUE" → "SCIENTIFIC"
+  - "LITTÉRAIRE" → "LITERARY"
+- Extract school code as complete 12-digit number (e.g., "620033010303")
+- Extract dates in DD/MM/YYYY format by parsing French text
+- Extract percentage as NUMBER ONLY (e.g., "56" not "56%")
+- Return ONLY clean JSON with NO markdown formatting
+
+📋 DOCUMENT STRUCTURE TO LOOK FOR:
+- Top: "RÉPUBLIQUE DÉMOCRATIQUE DU CONGO"
+- Title: "EXAMEN D'ÉTAT"
+- Subtitle: "ATTESTATION PROVISOIRE DE RÉUSSITE N°________/____"
+- Body text starting with: "JE SOUSSIGNÉ [INSPECTOR NAME]..."
+- Student section: "QUE LA NOMMÉE [STUDENT NAME]"
+- Birth info: "NÉE À [PLACE] LE [DATE]"
+- School info: "FINALISTE DE, (DU), (DE L') [SCHOOL NAME] CODE [12-DIGIT NUMBER]"
+- Results: "A RÉUSSI À L'EXAMEN D'ÉTAT SESSION [YEAR]"
+- Section: "EN SECTION [SECTION NAME]"
+- Option: "OPTION [OPTION NAME]"
+- Score: "AVEC [XX] % DES POINTS"
+- Issue info: "DÉLIVRÉ SINCÈREMENT ET EXACTEMENT À [PLACE], LE [DATE]"
+- Valid until: "VALABLE JUSQU'AU [DATE]"
+
+Analyze this State Exam Attestation and return ONLY the JSON data in the specified format with section/option translated to English.`;
   }
 
   if (formType === "highSchoolAttestation") {
@@ -865,7 +1091,7 @@ const callOpenAIAPI = async (fileData, formType) => {
         ],
       },
     ],
-    max_tokens: 6000,
+    max_tokens: 8000,
     temperature: 0.0, // Zero temperature for maximum consistency
     top_p: 0.1, // Very focused sampling
     frequency_penalty: 0.0,
@@ -937,6 +1163,8 @@ const processExtractedData = (extractedData, formType) => {
   let validationResult;
   if (formType === "stateDiploma") {
     validationResult = validateStateDiploma(extractedData);
+  } else if (formType === "stateExamAttestation") {
+    validationResult = validateStateExamAttestation(extractedData);
   } else {
     validationResult = validateBulletin(extractedData, formType);
   }
@@ -1148,6 +1376,111 @@ const validateStateDiploma = (data) => {
     hasMinimumData,
     extractionQuality,
     subjectCount: 0, // State diplomas don't have subjects
+  };
+};
+
+/**
+ * Validate State Exam Attestation extracted data
+ * @param {Object} data - The extracted State Exam Attestation data
+ * @returns {Object} Validation result with errors and warnings
+ */
+const validateStateExamAttestation = (data) => {
+  const errors = [];
+  const warnings = [];
+  const required = [];
+
+  console.log("🔍 Starting State Exam Attestation validation...");
+
+  const requiredFields = [
+    "attestationNumber",
+    "studentName",
+    "examSession",
+    "percentage",
+    "section",
+    "option",
+  ];
+
+  requiredFields.forEach((field) => {
+    if (!data[field] || data[field] === null) {
+      required.push(field);
+    }
+  });
+
+  // State Exam Attestation specific warnings
+  if (!data.schoolName) {
+    warnings.push("School name not extracted - check document body");
+  }
+  if (!data.schoolCode) {
+    warnings.push("School code not extracted - check document body");
+  }
+  if (!data.issuePlace || !data.issueDate) {
+    warnings.push(
+      "Issue location or date not extracted - check bottom section"
+    );
+  }
+  if (!data.validUntil) {
+    warnings.push("Validity date not extracted - check bottom section");
+  }
+  if (!data.inspectorName) {
+    warnings.push("Inspector name not extracted - check document");
+  }
+
+  // Validate birth date structure
+  if (
+    data.birthDate &&
+    (!data.birthDate.day || !data.birthDate.month || !data.birthDate.year)
+  ) {
+    warnings.push("Incomplete birth date - missing day, month, or year");
+  }
+
+  // Validate issue date structure
+  if (
+    data.issueDate &&
+    (!data.issueDate.day || !data.issueDate.month || !data.issueDate.year)
+  ) {
+    warnings.push("Incomplete issue date - missing day, month, or year");
+  }
+
+  // Validate validUntil date structure
+  if (
+    data.validUntil &&
+    (!data.validUntil.day || !data.validUntil.month || !data.validUntil.year)
+  ) {
+    warnings.push("Incomplete validity date - missing day, month, or year");
+  }
+
+  // Check if section and option are translated (should be in English)
+  if (data.section && /[àâäéèêëïîôùûüÿœæç]/i.test(data.section)) {
+    warnings.push(
+      "Section appears to be in French - should be translated to English"
+    );
+  }
+  if (data.option && /[àâäéèêëïîôùûüÿœæç]/i.test(data.option)) {
+    warnings.push(
+      "Option appears to be in French - should be translated to English"
+    );
+  }
+
+  const hasMinimumData =
+    data.studentName && data.attestationNumber && data.percentage;
+  const extractionQuality = hasMinimumData ? "good" : "poor";
+
+  console.log(
+    "✅ State Exam Attestation validation complete:",
+    errors.length === 0 ? "PASS" : "FAIL"
+  );
+  console.log(
+    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`
+  );
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings,
+    missingRequired: required,
+    hasMinimumData,
+    extractionQuality,
+    subjectCount: 0, // State exam attestations don't have subjects
   };
 };
 

@@ -12,6 +12,7 @@ const uploadRoutes = require("./routes/upload");
 const pdfRoutes = require("./routes/pdf");
 const bulletinRoutes = require("./routes/bulletins");
 const stateDiplomaPdfRoutes = require("./routes/stateDiplomaPdf");
+const stateExamAttestationPdfRoutes = require("./routes/stateExamAttestationPdf");
 const bachelorDiplomaPdfRoutes = require("./routes/bachelorDiplomaPdf");
 const collegeTranscriptPdfRoutes = require("./routes/collegeTranscriptPdf");
 const collegeAttestationPdfRoutes = require("./routes/collegeAttestationPdf");
@@ -75,6 +76,7 @@ app.get("/api/test", (req, res) => {
 app.use("/api/upload", uploadRoutes);
 app.use("/api", pdfRoutes);
 app.use("/api", stateDiplomaPdfRoutes);
+app.use("/api", stateExamAttestationPdfRoutes);
 app.use("/api", bachelorDiplomaPdfRoutes);
 app.use("/api", collegeTranscriptPdfRoutes);
 app.use("/api", collegeAttestationPdfRoutes);

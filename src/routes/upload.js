@@ -58,7 +58,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     // Extract and validate form type from request body
     let formType = req.body.formType || "form6"; // Default to form6 for backwards compatibility
 
-    // Validate form type - now supporting all 7 document types
+    // Validate form type - now supporting all 8 document types
     const validFormTypes = [
       "form4",
       "form6",
@@ -67,6 +67,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       "stateDiploma",
       "bachelorDiploma",
       "highSchoolAttestation",
+      "stateExamAttestation",
     ];
     if (!validFormTypes.includes(formType)) {
       console.warn(
