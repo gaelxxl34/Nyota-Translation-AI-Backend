@@ -61,8 +61,8 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
       isLandscape: true,
     });
 
-    // Navigate to the test page
-    const targetUrl = `${frontendUrl}/state-exam-attestation-test`;
+    // Navigate to the card-only page (same as other PDF routes)
+    const targetUrl = `${frontendUrl}/card-only`;
     console.log("🌐 Navigating to:", targetUrl);
 
     await page.goto(targetUrl, {
@@ -89,13 +89,20 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
     await page.evaluate(
       (data, docId) => {
         window.isPdfGenerationMode = true;
-        window.pdfAttestationData = data;
+        // Add formType to ensure CardOnlyPage renders the correct template
+        window.pdfAttestationData = {
+          ...data,
+          formType: "stateExamAttestation",
+        };
         window.documentId = docId;
 
         // Dispatch custom event to notify template
         window.dispatchEvent(
           new CustomEvent("pdf-attestation-data-ready", {
-            detail: data,
+            detail: {
+              ...data,
+              formType: "stateExamAttestation",
+            },
           })
         );
         console.log("✅ Attestation data injected and event dispatched");
