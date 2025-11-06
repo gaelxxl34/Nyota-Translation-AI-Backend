@@ -132,6 +132,39 @@ router.post("/state-exam-attestation-pdf", async (req, res) => {
 
     console.log("✅ Template content has loaded successfully");
 
+    // Wait for QR codes to load (CRITICAL for including QR in PDF)
+    console.log("⏳ Waiting for QR codes to load...");
+    await page.waitForFunction(
+      () => {
+        const qrImages = Array.from(
+          document.querySelectorAll(
+            '.qr-container img, [data-print-element="qr-image"]'
+          )
+        );
+
+        if (qrImages.length === 0) {
+          console.log("⚠️ No QR code images found yet");
+          return false;
+        }
+
+        console.log(`🔍 Found ${qrImages.length} QR code images`);
+
+        const allQRLoaded = qrImages.every((img) => {
+          const isLoaded = img.complete && img.naturalWidth > 0;
+          if (!isLoaded) {
+            console.log("⏳ Waiting for QR code:", img.src?.substring(0, 50));
+          }
+          return isLoaded;
+        });
+
+        console.log(`QR codes loaded: ${allQRLoaded}`);
+        return allQRLoaded;
+      },
+      { timeout: 15000, polling: 500 }
+    );
+
+    console.log("✅ All QR codes have loaded successfully");
+
     // Wait for fonts and images
     await page.evaluate(() => document.fonts.ready);
     await new Promise((resolve) => setTimeout(resolve, 1000));
