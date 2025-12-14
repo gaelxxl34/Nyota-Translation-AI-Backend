@@ -7,10 +7,20 @@ const path = require("path");
 
 // Import configuration and utilities
 const config = require("./config/env");
-const { verifyToken } = require("./auth");
+
+// Initialize Firebase Admin BEFORE importing routes that use Firestore
+const { verifyToken, initializeFirebaseAdmin } = require("./auth");
+initializeFirebaseAdmin();
+
+// Now import routes that depend on Firebase
 const uploadRoutes = require("./routes/upload");
 const pdfRoutes = require("./routes/pdf");
 const bulletinRoutes = require("./routes/bulletins");
+const dashboardRoutes = require("./routes/dashboard");
+const adminRoutes = require("./routes/admin");
+const translatorRoutes = require("./routes/translator");
+const partnerRoutes = require("./routes/partner");
+const supportRoutes = require("./routes/support");
 const stateDiplomaPdfRoutes = require("./routes/stateDiplomaPdf");
 const stateExamAttestationPdfRoutes = require("./routes/stateExamAttestationPdf");
 const bachelorDiplomaPdfRoutes = require("./routes/bachelorDiplomaPdf");
@@ -83,6 +93,11 @@ app.use("/api", collegeAttestationPdfRoutes);
 app.use("/api", highSchoolAttestationPdfRoutes);
 app.use("/api/qr", qrRoutes); // QR code generation routes (public - no auth required)
 app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
+app.use("/api", verifyToken, dashboardRoutes); // Protected dashboard routes
+app.use("/api/admin", adminRoutes); // Admin routes (auth handled inside routes)
+app.use("/api/translator", translatorRoutes); // Translator routes (auth handled inside routes)
+app.use("/api/partner", partnerRoutes); // Partner routes (auth handled inside routes)
+app.use("/api/support", supportRoutes); // Support routes (auth handled inside routes)
 
 // Protected route - requires Firebase authentication
 app.get("/api/profile", verifyToken, (req, res) => {

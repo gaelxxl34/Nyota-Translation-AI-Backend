@@ -7,6 +7,9 @@ const path = require("path");
 // Initialize Firebase Admin SDK
 let firebaseInitialized = false;
 
+// Firebase Storage bucket name
+const STORAGE_BUCKET = "ntc-app-7ac7e.firebasestorage.app";
+
 const initializeFirebaseAdmin = () => {
   if (firebaseInitialized) return;
 
@@ -24,8 +27,10 @@ const initializeFirebaseAdmin = () => {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: process.env.FIREBASE_PROJECT_ID,
+        storageBucket: STORAGE_BUCKET,
       });
       console.log("🔥 Firebase Admin initialized with service account key");
+      console.log(`📦 Storage bucket configured: ${STORAGE_BUCKET}`);
     } else {
       // Initialize using environment variables
       const serviceAccount = {
@@ -37,8 +42,10 @@ const initializeFirebaseAdmin = () => {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: process.env.FIREBASE_PROJECT_ID,
+        storageBucket: STORAGE_BUCKET,
       });
       console.log("🔥 Firebase Admin initialized with environment variables");
+      console.log(`📦 Storage bucket configured: ${STORAGE_BUCKET}`);
     }
 
     firebaseInitialized = true;
@@ -91,10 +98,53 @@ const verifyToken = async (req, res, next) => {
       authTime: decodedToken.auth_time,
       exp: decodedToken.exp,
       iat: decodedToken.iat,
+      // Include role from custom claims (set by admin)
+      role: decodedToken.role || "user",
+      permissions: decodedToken.permissions || [],
     };
 
+    // Try to get additional user info from Firestore (role, partnerId, etc.)
+    try {
+      const db = admin.firestore();
+      const userDoc = await db.collection("users").doc(decodedToken.uid).get();
+
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        // Merge Firestore data into req.user (Firestore takes precedence)
+        req.user.role = userData.role || req.user.role;
+        req.user.permissions = userData.permissions || req.user.permissions;
+        req.user.partnerId = userData.partnerId || null;
+        req.user.partnerName = userData.partnerName || null;
+        req.user.isActive = userData.isActive !== false;
+        req.user.displayName = userData.displayName || req.user.name;
+
+        // Check if user is deactivated
+        if (userData.isActive === false) {
+          return res.status(403).json({
+            error: "Account deactivated",
+            message:
+              "Your account has been deactivated. Please contact support.",
+            code: "ACCOUNT_DEACTIVATED",
+          });
+        }
+
+        // Update last login timestamp (fire and forget)
+        db.collection("users")
+          .doc(decodedToken.uid)
+          .update({
+            lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+          })
+          .catch(() => {}); // Ignore errors
+      }
+    } catch (firestoreError) {
+      // Don't block auth if Firestore lookup fails
+      console.warn(
+        `⚠️ Could not fetch user data from Firestore: ${firestoreError.message}`
+      );
+    }
+
     console.log(
-      `🔐 Token verified for user: ${req.user.email} (${req.user.uid})`
+      `🔐 Token verified for user: ${req.user.email} (${req.user.uid}) [Role: ${req.user.role}]`
     );
     next();
   } catch (error) {

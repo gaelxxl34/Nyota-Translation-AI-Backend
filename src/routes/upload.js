@@ -4,6 +4,11 @@
 const express = require("express");
 const { verifyToken } = require("../auth");
 const { upload, handleMulterError } = require("../middleware/upload");
+const {
+  uploadToStorage,
+  deleteLocalFile,
+  generateStoragePath,
+} = require("../services/storage");
 
 // Delayed configuration loading to ensure environment variables are available
 let processDocument;
@@ -124,6 +129,37 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         console.log(`✅ Fixed English values applied to college transcript`);
       }
 
+      // Upload file to Firebase Storage
+      let storageResult = { success: false };
+      try {
+        const storagePath = generateStoragePath(
+          req.user.uid,
+          formType,
+          req.file.originalname
+        );
+
+        storageResult = await uploadToStorage(req.file.path, storagePath, {
+          contentType: req.file.mimetype,
+          originalName: req.file.originalname,
+          userId: req.user.uid,
+          formType: formType,
+        });
+
+        if (storageResult.success) {
+          console.log(
+            `☁️ File uploaded to Firebase Storage: ${storageResult.storagePath}`
+          );
+        } else {
+          console.warn(
+            `⚠️ Failed to upload to Firebase Storage: ${storageResult.error}`
+          );
+        }
+      } catch (storageError) {
+        console.warn(
+          `⚠️ Firebase Storage upload error: ${storageError.message}`
+        );
+      }
+
       // Save OpenAI results to Firestore
       let firestoreDocId = null;
       try {
@@ -165,7 +201,13 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             lastModified: admin.firestore.FieldValue.serverTimestamp(),
             fileName: req.file.originalname,
             fileSize: req.file.size,
-            filePath: req.file.path,
+            // Firebase Storage info (preferred) with local fallback
+            storageUrl: storageResult.success ? storageResult.url : null,
+            storagePath: storageResult.success
+              ? storageResult.storagePath
+              : null,
+            storageBucket: storageResult.success ? storageResult.bucket : null,
+            localFilePath: req.file.path, // Keep for fallback/debugging
             status: extractionResult.success ? "processed" : "failed",
             formType: formType, // Add form type to metadata
             studentName:
@@ -221,16 +263,30 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         console.error("Firestore error details:", firestoreError);
       }
 
+      // Clean up local file after successful Firebase Storage upload
+      if (storageResult.success) {
+        try {
+          await deleteLocalFile(req.file.path);
+          console.log(`🧹 Local file cleaned up after successful cloud upload`);
+        } catch (cleanupError) {
+          console.warn(
+            `⚠️ Failed to clean up local file: ${cleanupError.message}`
+          );
+        }
+      }
+
       // Return the extracted and translated data
       res.status(200).json({
         message: "File uploaded and processed successfully",
         file: {
           filename: req.file.filename,
           originalName: req.file.originalname,
-          path: req.file.path,
           size: req.file.size,
           mimetype: req.file.mimetype,
-          formType: formType, // Include form type in file metadata
+          formType: formType,
+          // Include storage info in response
+          storageUrl: storageResult.success ? storageResult.url : null,
+          storagePath: storageResult.success ? storageResult.storagePath : null,
         },
         user: {
           uid: req.user.uid,
@@ -259,6 +315,29 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
 
       const statusCode = isTimeout ? 408 : 206; // 408 for timeout, 206 for partial success
 
+      // Still try to upload file to storage even if AI processing failed
+      let errorStorageResult = { success: false };
+      try {
+        const storagePath = generateStoragePath(
+          req.user.uid,
+          formType,
+          req.file.originalname
+        );
+        errorStorageResult = await uploadToStorage(req.file.path, storagePath, {
+          contentType: req.file.mimetype,
+          originalName: req.file.originalname,
+          userId: req.user.uid,
+          formType: formType,
+        });
+        if (errorStorageResult.success) {
+          await deleteLocalFile(req.file.path);
+        }
+      } catch (storageErr) {
+        console.warn(
+          `⚠️ Storage upload failed during error handling: ${storageErr.message}`
+        );
+      }
+
       // Return appropriate error response
       res.status(statusCode).json({
         message: isTimeout
@@ -267,10 +346,15 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         file: {
           filename: req.file.filename,
           originalName: req.file.originalname,
-          path: req.file.path,
           size: req.file.size,
           mimetype: req.file.mimetype,
-          formType: formType, // Include form type even in error response
+          formType: formType,
+          storageUrl: errorStorageResult.success
+            ? errorStorageResult.url
+            : null,
+          storagePath: errorStorageResult.success
+            ? errorStorageResult.storagePath
+            : null,
         },
         user: {
           uid: req.user.uid,
