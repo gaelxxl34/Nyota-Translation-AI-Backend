@@ -56,7 +56,7 @@ const prepareFileForClaude = (filePath) => {
   const fileStats = fs.statSync(filePath);
   const fileExtension = path.extname(filePath).toLowerCase();
   console.log(
-    `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}`
+    `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}`,
   );
 
   // Read file as base64 for Claude Vision API
@@ -152,6 +152,16 @@ const getClaudeSystemPrompt = (formType) => {
 - AGGREGATE SYSTEM: "Maxima Généraux" = AGGREGATE MAXIMA
 - TOTALS: "Totaux" = AGGREGATES  
 - POSITION: "Place/Nbre d'élèves" = POSITION/OUT OF
+
+📊 SUMMARY ROW EXTRACTION (MANDATORY):
+After the subjects table, look for summary rows with these labels:
+- "MAXIMA GÉNÉRAUX" or "Maxima Généraux" → Extract ALL values as aggregatesMaxima
+- "TOTAUX" or "Totaux" → Extract ALL values as aggregates
+- "POURCENTAGE" or "Percentage" → Extract percentage values (NUMBER ONLY, NO % SIGN, e.g., "56.7" not "56.7%")
+- "PLACE" or "Position" → Extract position/ranking in clean format (e.g., "15/45" ONLY, not "15/45 / 45" or with extra text)
+
+These summary rows contain totals for each column (Period 1, Period 2, Exam, Total for both semesters).
+YOU MUST extract these values and include them in the summaryValues object.
 
 🚨 CRITICAL RULES (MANDATORY):
 1. **EXACT VISUAL ORDER**: Preserve the EXACT vertical order of subjects as seen in the image
@@ -337,6 +347,56 @@ Return the data in this exact JSON format:
   "totalStudents": number or null,
   "application": "string or null",
   "behaviour": "string or null",
+  "summaryValues": {
+    "aggregatesMaxima": {
+      "period1": "string or null",
+      "period2": "string or null",
+      "exam1": "string or null",
+      "total1": "string or null",
+      "period3": "string or null",
+      "period4": "string or null",
+      "exam2": "string or null",
+      "total2": "string or null",
+      "overall": "string or null",
+      "nationalExamMarks": "string or null",
+      "nationalExamMax": "string or null"
+    },
+    "aggregates": {
+      "period1": "string or null",
+      "period2": "string or null",
+      "exam1": "string or null",
+      "total1": "string or null",
+      "period3": "string or null",
+      "period4": "string or null",
+      "exam2": "string or null",
+      "total2": "string or null",
+      "overall": "string or null",
+      "nationalExamMarks": "string or null",
+      "nationalExamMax": "string or null"
+    },
+    "percentage": {
+      "period1": "string or null (number only, no % sign)",
+      "period2": "string or null (number only, no % sign)",
+      "exam1": "string or null (number only, no % sign)",
+      "total1": "string or null (number only, no % sign)",
+      "period3": "string or null (number only, no % sign)",
+      "period4": "string or null (number only, no % sign)",
+      "exam2": "string or null (number only, no % sign)",
+      "total2": "string or null (number only, no % sign)",
+      "overall": "string or null (number only, no % sign)"
+    },
+    "position": {
+      "period1": "string or null (e.g., '15/45')",
+      "period2": "string or null (e.g., '15/45')",
+      "exam1": "string or null (e.g., '15/45')",
+      "total1": "string or null (e.g., '15/45')",
+      "period3": "string or null (e.g., '15/45')",
+      "period4": "string or null (e.g., '15/45')",
+      "exam2": "string or null (e.g., '15/45')",
+      "total2": "string or null (e.g., '15/45')",
+      "overall": "string or null (e.g., '15/45')"
+    }
+  },
   "finalResultPercentage": "string or null",
   "isPromoted": boolean or null,
   "shouldRepeat": "string or null",
@@ -347,7 +407,9 @@ Return the data in this exact JSON format:
   "endorsementDate": "string or null"
 }
 
-Return ONLY clean JSON with ALL subjects in English.`;
+🚨 CRITICAL: Make sure to extract summaryValues from the AGGREGATES/TOTAUX rows at the bottom of the grades table.
+
+Return ONLY clean JSON with ALL subjects in English and ALL summary values extracted.`;
 };
 
 /**
@@ -362,7 +424,7 @@ const callClaudeAPI = async (fileData, formType) => {
   const userPrompt = getClaudeUserPrompt(formType);
 
   console.log(
-    `📤 Processing ${fileData.fileExtension} file with Claude Sonnet 4...`
+    `📤 Processing ${fileData.fileExtension} file with Claude Sonnet 4...`,
   );
 
   const message = await anthropic.messages.create({
@@ -411,6 +473,22 @@ const parseClaudeResponse = (aiResponse) => {
   // Clean the response (remove any markdown formatting)
   let cleanedResponse = aiResponse.replace(/```json\n?|\n?```/g, "").trim();
 
+  // Fix common JSON issues before parsing
+  // 1. Remove trailing commas before closing braces/brackets
+  cleanedResponse = cleanedResponse.replace(/,(\s*[}\]])/g, "$1");
+
+  // 2. Fix numbers with commas (e.g., "1,234" -> "1234")
+  cleanedResponse = cleanedResponse.replace(/:\s*"(\d+),(\d+)"/g, ': "$1$2"');
+
+  // 3. Fix unquoted numbers that should be strings
+  cleanedResponse = cleanedResponse.replace(
+    /:\s*(\d+\.?\d*)\s*([,\n}])/g,
+    (match, num, next) => {
+      // Keep as number if it's an integer or decimal, quote if it looks like it should be a string
+      return `: "${num}"${next}`;
+    },
+  );
+
   // Check if response was truncated and try to fix common issues
   if (!cleanedResponse.endsWith("}")) {
     console.warn("⚠️  Response appears truncated, attempting to fix...");
@@ -432,6 +510,21 @@ const parseClaudeResponse = (aiResponse) => {
     console.error("Failed to parse Claude response as JSON:", parseError);
     console.error("Raw response length:", aiResponse.length);
     console.error("Last 200 characters:", aiResponse.slice(-200));
+    console.error("First 500 characters:", aiResponse.slice(0, 500));
+
+    // Log the problematic section around the error position
+    if (parseError.message.includes("position")) {
+      const position = parseInt(
+        parseError.message.match(/position (\d+)/)?.[1] || "0",
+      );
+      const start = Math.max(0, position - 100);
+      const end = Math.min(cleanedResponse.length, position + 100);
+      console.error(
+        `Context around error (position ${position}):`,
+        cleanedResponse.slice(start, end),
+      );
+    }
+
     throw new Error(`Invalid JSON response from Claude: ${parseError.message}`);
   }
 };
@@ -452,15 +545,15 @@ const handleClaudeError = (error) => {
   // Handle specific Claude API errors
   if (error.status === 429) {
     throw new Error(
-      "Claude API rate limit exceeded. Please try again in a moment."
+      "Claude API rate limit exceeded. Please try again in a moment.",
     );
   } else if (error.status === 401) {
     throw new Error(
-      "Claude API authentication failed. Please check your API key."
+      "Claude API authentication failed. Please check your API key.",
     );
   } else if (error.status === 400) {
     throw new Error(
-      "Invalid request to Claude API. The file might be corrupted or in an unsupported format."
+      "Invalid request to Claude API. The file might be corrupted or in an unsupported format.",
     );
   } else {
     throw new Error(`Claude processing failed: ${error.message}`);
@@ -475,14 +568,14 @@ const handleClaudeError = (error) => {
  */
 const extractBulletinWithClaude = async (filePath, formType = "form6") => {
   console.log(
-    `🔍 Starting Claude Sonnet 4 processing for file: ${filePath} (${formType})`
+    `🔍 Starting Claude Sonnet 4 processing for file: ${filePath} (${formType})`,
   );
 
   try {
     // Step 1: Prepare file for processing
     const fileData = prepareFileForClaude(filePath);
     console.log(
-      `📄 File prepared: ${fileData.filename}, size: ${fileData.fileStats.size} bytes`
+      `📄 File prepared: ${fileData.filename}, size: ${fileData.fileStats.size} bytes`,
     );
 
     // Step 2: Call Claude API
@@ -493,7 +586,7 @@ const extractBulletinWithClaude = async (filePath, formType = "form6") => {
 
     console.log(
       "✅ Successfully extracted data with Claude:",
-      extractedData.studentName || "Unknown Student"
+      extractedData.studentName || "Unknown Student",
     );
 
     // Step 4: Return results

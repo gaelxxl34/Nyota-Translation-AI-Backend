@@ -25,7 +25,6 @@ router.post("/export-pdf", async (req, res) => {
       frontendUrl = config.frontend.urlAlt, // Use port 5174 as default since that's where frontend is running
       waitSelector = "#bulletin-template",
       waitForImages = false, // NEW: Wait for images including QR codes
-      tableSize = "auto", // Table size for Form6 template
       pdfOptions = {},
     } = req.body;
 
@@ -34,7 +33,7 @@ router.post("/export-pdf", async (req, res) => {
     // FIRESTORE-FIRST: Always fetch data from Firestore
     if (!firestoreId) {
       console.error(
-        "❌ No Firestore ID provided - PDF generation requires Firestore document ID"
+        "❌ No Firestore ID provided - PDF generation requires Firestore document ID",
       );
       return res.status(400).json({
         error:
@@ -47,7 +46,10 @@ router.post("/export-pdf", async (req, res) => {
       });
     }
 
+    // Declare variables in outer scope to be accessible throughout the route
     let finalStudentData = null;
+    let formType = "form6"; // Default form type
+    let tableSize = "auto"; // Default table size
 
     try {
       initializeFirebaseAdmin();
@@ -74,8 +76,11 @@ router.post("/export-pdf", async (req, res) => {
       finalStudentData = bulletinData.editedData || bulletinData.originalData;
 
       // Extract form type from Firestore metadata (with backward compatibility)
-      const formType =
+      formType =
         bulletinData.formType || bulletinData.metadata?.formType || "form6";
+
+      // Extract tableSize from Firestore data (default to 'auto' if not set)
+      tableSize = finalStudentData?.tableSize || "auto";
 
       // Include form type in the student data for template selection
       if (finalStudentData) {
@@ -84,7 +89,7 @@ router.post("/export-pdf", async (req, res) => {
 
       console.log(
         "✅ Retrieved latest data from Firestore:",
-        JSON.stringify(finalStudentData, null, 2)
+        JSON.stringify(finalStudentData, null, 2),
       );
       console.log("📊 Data structure:", {
         hasEditedData: !!bulletinData.editedData,
@@ -92,12 +97,13 @@ router.post("/export-pdf", async (req, res) => {
         usingEditedData: !!bulletinData.editedData,
         studentName: finalStudentData?.studentName,
         formType: formType,
+        tableSize: tableSize,
         dataKeys: finalStudentData ? Object.keys(finalStudentData) : [],
       });
     } catch (firestoreError) {
       console.error(
         "❌ Failed to retrieve from Firestore:",
-        firestoreError.message
+        firestoreError.message,
       );
       return res.status(500).json({
         error: "Failed to retrieve bulletin data from Firestore",
@@ -147,7 +153,7 @@ router.post("/export-pdf", async (req, res) => {
 
     // Navigate to the card-only page with table size parameter
     const cardUrl = `${frontendUrl}/card-only?tableSize=${encodeURIComponent(
-      tableSize
+      tableSize,
     )}`;
     console.log("🌐 Navigating to:", cardUrl);
 
@@ -163,21 +169,21 @@ router.post("/export-pdf", async (req, res) => {
         const root = document.querySelector("#root");
         return root && root.children.length > 0;
       },
-      { timeout: 15000 }
+      { timeout: 15000 },
     );
 
     // Always inject data for PDF generation to ensure reliability
     console.log(
-      "💉 Injecting fresh student data from Firestore for PDF generation"
+      "💉 Injecting fresh student data from Firestore for PDF generation",
     );
     console.log(
       "💉 Injecting student data:",
-      JSON.stringify(finalStudentData, null, 2)
+      JSON.stringify(finalStudentData, null, 2),
     );
     console.log(
       `🎯 PDF Generation: Using formType: ${
         finalStudentData.formType || "form6"
-      } for template selection`
+      } for template selection`,
     );
 
     // Normalize the student data - handle different structures
@@ -232,7 +238,7 @@ router.post("/export-pdf", async (req, res) => {
 
     console.log(
       "📊 Normalized data for injection (with documentId):",
-      JSON.stringify(normalizedData, null, 2)
+      JSON.stringify(normalizedData, null, 2),
     );
 
     await page.evaluate((data) => {
@@ -254,7 +260,7 @@ router.post("/export-pdf", async (req, res) => {
 
       // Dispatch custom event to notify React component
       window.dispatchEvent(
-        new CustomEvent("studentDataLoaded", { detail: data })
+        new CustomEvent("studentDataLoaded", { detail: data }),
       );
       console.log("✅ Fresh Firestore data injected and event dispatched");
 
@@ -410,7 +416,7 @@ router.post("/export-pdf", async (req, res) => {
         );
       },
       { timeout: 20000 }, // Increased timeout to 20 seconds
-      normalizedData?.studentName || "MUKENDI"
+      normalizedData?.studentName || "MUKENDI",
     );
 
     // Wait an additional moment for any dynamic content to load
@@ -425,12 +431,12 @@ router.post("/export-pdf", async (req, res) => {
           const images = Array.from(document.querySelectorAll("img"));
           const qrImages = Array.from(
             document.querySelectorAll(
-              '.qr-container img, [data-print-element="qr-image"]'
-            )
+              '.qr-container img, [data-print-element="qr-image"]',
+            ),
           );
 
           console.log(
-            `Found ${images.length} total images, ${qrImages.length} QR images`
+            `Found ${images.length} total images, ${qrImages.length} QR images`,
           );
 
           // Check if all images are loaded
@@ -450,18 +456,18 @@ router.post("/export-pdf", async (req, res) => {
               if (!loaded) {
                 console.log(
                   "Waiting for QR code:",
-                  img.src ? img.src.substring(0, 50) : "unknown"
+                  img.src ? img.src.substring(0, 50) : "unknown",
                 );
               }
               return loaded;
             });
 
           console.log(
-            `Images loaded: ${allImagesLoaded}, QR codes loaded: ${qrCodesLoaded}`
+            `Images loaded: ${allImagesLoaded}, QR codes loaded: ${qrCodesLoaded}`,
           );
           return allImagesLoaded && qrCodesLoaded;
         },
-        { timeout: 15000, polling: 1000 }
+        { timeout: 15000, polling: 1000 },
       );
 
       console.log("✅ All images (including QR codes) have loaded");

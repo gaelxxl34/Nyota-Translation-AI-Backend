@@ -15,6 +15,27 @@ const admin = require("firebase-admin");
 
 const router = express.Router();
 
+// Helper function to convert Firestore Timestamp to ISO string
+const convertTimestamp = (timestamp) => {
+  if (!timestamp) return null;
+  // Handle Firestore Timestamp object
+  if (timestamp._seconds !== undefined) {
+    return new Date(timestamp._seconds * 1000).toISOString();
+  }
+  // Handle Firestore Timestamp with toDate() method
+  if (typeof timestamp.toDate === "function") {
+    return timestamp.toDate().toISOString();
+  }
+  // Handle already converted string or Date
+  if (typeof timestamp === "string") {
+    return timestamp;
+  }
+  if (timestamp instanceof Date) {
+    return timestamp.toISOString();
+  }
+  return null;
+};
+
 // Apply role info middleware to all admin routes
 router.use(attachRoleInfo());
 
@@ -46,7 +67,7 @@ router.get(
 
       const users = await userService.getUsers(filters);
 
-      // Remove sensitive data
+      // Remove sensitive data and convert timestamps
       const sanitizedUsers = users.map((user) => ({
         id: user.id,
         uid: user.uid,
@@ -58,8 +79,8 @@ router.get(
         isActive: user.isActive,
         partnerId: user.partnerId,
         partnerName: user.partnerName,
-        createdAt: user.createdAt,
-        lastLogin: user.lastLogin,
+        createdAt: convertTimestamp(user.createdAt),
+        lastLogin: convertTimestamp(user.lastLogin),
       }));
 
       res.json({
@@ -121,7 +142,7 @@ router.get(
         });
       }
 
-      // Remove sensitive data
+      // Remove sensitive data and convert timestamps
       const sanitizedUser = {
         id: user.id,
         uid: user.uid,
@@ -134,9 +155,9 @@ router.get(
         isActive: user.isActive,
         partnerId: user.partnerId,
         partnerName: user.partnerName,
-        createdAt: user.createdAt,
+        createdAt: convertTimestamp(user.createdAt),
         createdBy: user.createdBy,
-        lastLogin: user.lastLogin,
+        lastLogin: convertTimestamp(user.lastLogin),
         preferences: user.preferences,
       };
 

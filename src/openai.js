@@ -60,7 +60,7 @@ const prepareFileForProcessing = (filePath) => {
   const fileStats = fs.statSync(filePath);
   const fileExtension = path.extname(filePath).toLowerCase();
   console.log(
-    `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}`
+    `📄 File size: ${fileStats.size} bytes, extension: ${fileExtension}`,
   );
 
   // Read file as base64 for Vision API
@@ -281,9 +281,9 @@ Return data in this exact JSON format:
     "year": "string or null"
   },
   "validUntil": {
-    "day": "string or null",
-    "month": "string or null",
-    "year": "string or null"
+    "day": "string or null (OPTIONAL - can be null if not on document)",
+    "month": "string or null (OPTIONAL - can be null if not on document)",
+    "year": "string or null (OPTIONAL - can be null if not on document)"
   },
   "inspectorName": "string or null"
 }`;
@@ -723,12 +723,23 @@ Return data in this exact JSON format:
 - TOTALS: "Totaux" = AGGREGATES  
 - POSITION: "Place/Nbre d'élèves" = POSITION/OUT OF
 
+� SUMMARY ROW EXTRACTION (MANDATORY):
+After the subjects table, look for summary rows with these labels:
+- "MAXIMA GÉNÉRAUX" or "Maxima Généraux" → Extract ALL values as aggregatesMaxima
+- "TOTAUX" or "Totaux" → Extract ALL values as aggregates
+- "POURCENTAGE" or "Percentage" → Extract percentage values (NUMBER ONLY, NO % SIGN, e.g., "56.7" not "56.7%")
+- "PLACE" or "Position" → Extract position/ranking in clean format (e.g., "15/45" ONLY, not "15/45 / 45" or with extra text)
+
+These summary rows contain totals for each column (Period 1, Period 2, Exam, Total for both semesters).
+YOU MUST extract these values and include them in the summaryValues object.
+
 🚨 CRITICAL RULES (MANDATORY):
 1. **ROW-BY-ROW EXTRACTION**: Scan each MAXIMA section from top to bottom
 2. **PRESERVE EXACT ORDER**: Subject 1 under MAXIMA 10 comes before Subject 1 under MAXIMA 20
 3. **TRANSLATE ALL SUBJECTS**: Every single subject name MUST be in English
 4. **NO FRENCH NAMES**: Check your JSON before responding - if you see French, translate it
 5. **NO MAXIMA < 10**: Impossible in DRC system - re-check if you see this
+6. **EXTRACT SUMMARY ROWS**: Always extract AGGREGATES MAXIMA, AGGREGATES, PERCENTAGE, and POSITION
 
 💡 EXAMPLE EXTRACTION (4ième Scientifique):
 Under "MAXIMA: 10" you might see:
@@ -820,6 +831,56 @@ JSON SCHEMA:
   "totalStudents": number or null,
   "application": "string or null",
   "behaviour": "string or null",
+  "summaryValues": {
+    "aggregatesMaxima": {
+      "period1": "string or null",
+      "period2": "string or null",
+      "exam1": "string or null",
+      "total1": "string or null",
+      "period3": "string or null",
+      "period4": "string or null",
+      "exam2": "string or null",
+      "total2": "string or null",
+      "overall": "string or null",
+      "nationalExamMarks": "string or null",
+      "nationalExamMax": "string or null"
+    },
+    "aggregates": {
+      "period1": "string or null",
+      "period2": "string or null",
+      "exam1": "string or null",
+      "total1": "string or null",
+      "period3": "string or null",
+      "period4": "string or null",
+      "exam2": "string or null",
+      "total2": "string or null",
+      "overall": "string or null",
+      "nationalExamMarks": "string or null",
+      "nationalExamMax": "string or null"
+    },
+    "percentage": {
+      "period1": "string or null (number only, no % sign)",
+      "period2": "string or null (number only, no % sign)",
+      "exam1": "string or null (number only, no % sign)",
+      "total1": "string or null (number only, no % sign)",
+      "period3": "string or null (number only, no % sign)",
+      "period4": "string or null (number only, no % sign)",
+      "exam2": "string or null (number only, no % sign)",
+      "total2": "string or null (number only, no % sign)",
+      "overall": "string or null (number only, no % sign)"
+    },
+    "position": {
+      "period1": "string or null (e.g., '15/45')",
+      "period2": "string or null (e.g., '15/45')",
+      "exam1": "string or null (e.g., '15/45')",
+      "total1": "string or null (e.g., '15/45')",
+      "period3": "string or null (e.g., '15/45')",
+      "period4": "string or null (e.g., '15/45')",
+      "exam2": "string or null (e.g., '15/45')",
+      "total2": "string or null (e.g., '15/45')",
+      "overall": "string or null (e.g., '15/45')"
+    }
+  },
   "finalResultPercentage": "string or null",
   "isPromoted": boolean or null,
   "shouldRepeat": "string or null",
@@ -828,7 +889,11 @@ JSON SCHEMA:
   "centerCode": "string or null",
   "verifierName": "string or null",
   "endorsementDate": "string or null"
-}`;
+}
+
+🚨 CRITICAL: Make sure to extract summaryValues from the AGGREGATES/TOTAUX rows at the bottom of the grades table.
+
+Return ONLY clean JSON with ALL subjects in English and ALL summary values extracted.`;
 };
 
 /**
@@ -896,7 +961,8 @@ Analyze this State Diploma and return the extracted data in the specified JSON f
 6. Extract examination session year
 7. Extract section and option names - **MUST TRANSLATE TO ENGLISH**
 8. Extract percentage score (number only, without % symbol)
-9. Extract issue place and dates (issue date and valid until date)
+9. Extract issue place and date
+10. Extract "valid until" date ONLY IF PRESENT (this field is optional - some documents don't have it)
 
 🚨 CRITICAL REQUIREMENTS - READ CAREFULLY:
 - This is an "ATTESTATION PROVISOIRE" (Provisional Pass Certificate), NOT a diploma
@@ -924,7 +990,9 @@ Analyze this State Diploma and return the extracted data in the specified JSON f
 - Option: "OPTION [OPTION NAME]"
 - Score: "AVEC [XX] % DES POINTS"
 - Issue info: "DÉLIVRÉ SINCÈREMENT ET EXACTEMENT À [PLACE], LE [DATE]"
-- Valid until: "VALABLE JUSQU'AU [DATE]"
+- Valid until: "VALABLE JUSQU'AU [DATE]" (OPTIONAL - may not be present on all documents)
+
+⚠️ IMPORTANT: If "VALABLE JUSQU'AU" is not visible on the document, set validUntil fields to empty strings or null.
 
 Analyze this State Exam Attestation and return ONLY the JSON data in the specified format with section/option translated to English.`;
   }
@@ -1064,7 +1132,7 @@ const callOpenAIAPI = async (fileData, formType) => {
   const userPrompt = getUserPrompt(formType);
 
   console.log(
-    `📤 Processing ${fileData.fileExtension} file with OpenAI Vision API...`
+    `📤 Processing ${fileData.fileExtension} file with OpenAI Vision API...`,
   );
 
   const response = await openai.chat.completions.create({
@@ -1139,23 +1207,23 @@ const parseOpenAIResponse = (aiResponse) => {
     console.error("Raw response length:", aiResponse.length);
     console.error("Last 200 characters:", aiResponse.slice(-200));
     throw new Error(
-      `Invalid JSON response from OpenAI: ${parseError.message}. Response may have been truncated due to token limit.`
+      `Invalid JSON response from OpenAI: ${parseError.message}. Response may have been truncated due to token limit.`,
     );
   }
 };
 
 /**
- * Process extracted data (sort subjects, run validation)
+ * Process extracted data (run validation without sorting)
  * @param {Object} extractedData - Parsed data from OpenAI
  * @param {string} formType - Form type
  * @returns {Object} Processed data with validation results
  */
 const processExtractedData = (extractedData, formType) => {
-  // Post-process: Sort subjects by maxima values (lower to higher) while preserving original order within groups
+  // DISABLED: No longer sorting subjects - preserve exact order from image
+  // The AI now extracts subjects in the exact visual order they appear
   if (extractedData.subjects && Array.isArray(extractedData.subjects)) {
-    extractedData.subjects = sortSubjectsByMaxima(extractedData.subjects);
     console.log(
-      "📊 Subjects sorted by maxima values (lower to higher), original order preserved within groups"
+      "📊 Subjects preserved in exact visual order from image (no sorting applied)",
     );
   }
 
@@ -1191,14 +1259,14 @@ const logValidationResults = (validationResult) => {
   if (validationResult.warnings.length > 0) {
     console.warn("⚠️  VALIDATION WARNINGS:");
     validationResult.warnings.forEach((warning) =>
-      console.warn(`   ⚠️  ${warning}`)
+      console.warn(`   ⚠️  ${warning}`),
     );
   }
 
   if (validationResult.missingRequired.length > 0) {
     console.warn("📋 MISSING REQUIRED FIELDS:");
     validationResult.missingRequired.forEach((field) =>
-      console.warn(`   📝 ${field}`)
+      console.warn(`   📝 ${field}`),
     );
   }
 };
@@ -1211,7 +1279,7 @@ const logValidationResults = (validationResult) => {
 const logExtractionSummary = (extractedData, validationResult) => {
   console.log(
     "✅ Successfully extracted data:",
-    extractedData.studentName || "Unknown Student"
+    extractedData.studentName || "Unknown Student",
   );
 
   // Log extraction quality summary
@@ -1220,15 +1288,15 @@ const logExtractionSummary = (extractedData, validationResult) => {
   console.log(`   🎓 Class: ${extractedData.class || "Not extracted"}`);
   console.log(`   📚 Subjects: ${validationResult.subjectCount || 0}`);
   console.log(
-    `   🎯 Validation: ${validationResult.isValid ? "PASS" : "FAIL"}`
+    `   🎯 Validation: ${validationResult.isValid ? "PASS" : "FAIL"}`,
   );
   console.log(
-    `   📈 Confidence: ${validationResult.extractionQuality || "N/A"}%`
+    `   📈 Confidence: ${validationResult.extractionQuality || "N/A"}%`,
   );
   console.log(
     `   ⚠️  Issues: ${
       validationResult.errors.length + validationResult.warnings.length
-    }`
+    }`,
   );
 };
 
@@ -1249,19 +1317,19 @@ const handleOpenAIError = (error) => {
   // Handle specific OpenAI API errors
   if (error.status === 429) {
     throw new Error(
-      "OpenAI API quota exceeded. Please check your billing details and try again later."
+      "OpenAI API quota exceeded. Please check your billing details and try again later.",
     );
   } else if (error.status === 401) {
     throw new Error(
-      "OpenAI API authentication failed. Please check your API key."
+      "OpenAI API authentication failed. Please check your API key.",
     );
   } else if (error.status === 400) {
     throw new Error(
-      "Invalid request to OpenAI API. The file might be corrupted or in an unsupported format."
+      "Invalid request to OpenAI API. The file might be corrupted or in an unsupported format.",
     );
   } else if (error.code === "insufficient_quota") {
     throw new Error(
-      "OpenAI API quota insufficient. Please add credits to your OpenAI account or enable mock mode."
+      "OpenAI API quota insufficient. Please add credits to your OpenAI account or enable mock mode.",
     );
   } else {
     throw new Error(`OpenAI processing failed: ${error.message}`);
@@ -1277,7 +1345,7 @@ const handleOpenAIError = (error) => {
  */
 const uploadAndExtractWithOpenAI = async (
   filePath,
-  formType = "stateDiploma"
+  formType = "stateDiploma",
 ) => {
   console.log(`🤖 OpenAI GPT-4o: Processing ${formType} from ${filePath}`);
 
@@ -1285,7 +1353,7 @@ const uploadAndExtractWithOpenAI = async (
     // Step 1: Prepare file for processing
     const fileData = prepareFileForProcessing(filePath);
     console.log(
-      `📄 File prepared: ${fileData.filename}, size: ${fileData.fileStats.size} bytes`
+      `📄 File prepared: ${fileData.filename}, size: ${fileData.fileStats.size} bytes`,
     );
 
     // Step 2: Call OpenAI API
@@ -1347,7 +1415,7 @@ const validateStateDiploma = (data) => {
   // State Diploma specific warnings
   if (!data.serialCode && !data.serialNumbers) {
     warnings.push(
-      "Serial code/numbers not extracted - check certificate details"
+      "Serial code/numbers not extracted - check certificate details",
     );
   }
   if (!data.issueDate) {
@@ -1362,10 +1430,10 @@ const validateStateDiploma = (data) => {
 
   console.log(
     "✅ State Diploma validation complete:",
-    errors.length === 0 ? "PASS" : "FAIL"
+    errors.length === 0 ? "PASS" : "FAIL",
   );
   console.log(
-    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`
+    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`,
   );
 
   return {
@@ -1415,11 +1483,17 @@ const validateStateExamAttestation = (data) => {
   }
   if (!data.issuePlace || !data.issueDate) {
     warnings.push(
-      "Issue location or date not extracted - check bottom section"
+      "Issue location or date not extracted - check bottom section",
     );
   }
-  if (!data.validUntil) {
-    warnings.push("Validity date not extracted - check bottom section");
+  // validUntil is now optional - only warn if present but incomplete
+  if (
+    data.validUntil &&
+    (!data.validUntil.day || !data.validUntil.month || !data.validUntil.year)
+  ) {
+    warnings.push(
+      "Validity date is present but incomplete - missing day, month, or year",
+    );
   }
   if (!data.inspectorName) {
     warnings.push("Inspector name not extracted - check document");
@@ -1441,23 +1515,18 @@ const validateStateExamAttestation = (data) => {
     warnings.push("Incomplete issue date - missing day, month, or year");
   }
 
-  // Validate validUntil date structure
-  if (
-    data.validUntil &&
-    (!data.validUntil.day || !data.validUntil.month || !data.validUntil.year)
-  ) {
-    warnings.push("Incomplete validity date - missing day, month, or year");
-  }
+  // validUntil is optional - only validate if present
+  // Removed validation warning since this field is now optional
 
   // Check if section and option are translated (should be in English)
   if (data.section && /[àâäéèêëïîôùûüÿœæç]/i.test(data.section)) {
     warnings.push(
-      "Section appears to be in French - should be translated to English"
+      "Section appears to be in French - should be translated to English",
     );
   }
   if (data.option && /[àâäéèêëïîôùûüÿœæç]/i.test(data.option)) {
     warnings.push(
-      "Option appears to be in French - should be translated to English"
+      "Option appears to be in French - should be translated to English",
     );
   }
 
@@ -1467,10 +1536,10 @@ const validateStateExamAttestation = (data) => {
 
   console.log(
     "✅ State Exam Attestation validation complete:",
-    errors.length === 0 ? "PASS" : "FAIL"
+    errors.length === 0 ? "PASS" : "FAIL",
   );
   console.log(
-    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`
+    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`,
   );
 
   return {
@@ -1528,7 +1597,7 @@ const validateBulletin = (data, formType = "form6") => {
   if (data.extractionMetadata) {
     if (data.extractionMetadata.confidence < 70) {
       warnings.push(
-        `Low extraction confidence: ${data.extractionMetadata.confidence}%`
+        `Low extraction confidence: ${data.extractionMetadata.confidence}%`,
       );
     }
 
@@ -1538,8 +1607,8 @@ const validateBulletin = (data, formType = "form6") => {
     ) {
       warnings.push(
         `Missing fields reported: ${data.extractionMetadata.missingFields.join(
-          ", "
-        )}`
+          ", ",
+        )}`,
       );
     }
   }
@@ -1550,7 +1619,7 @@ const validateBulletin = (data, formType = "form6") => {
 
   console.log(`✅ Bulletin validation complete: ${isValid ? "PASS" : "FAIL"}`);
   console.log(
-    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`
+    `📊 Stats: ${errors.length} errors, ${warnings.length} warnings, ${required.length} missing required`,
   );
 
   return {
@@ -1586,7 +1655,7 @@ const validateSubject = (subject, index, errors, warnings) => {
       subject.maxima.totalMaxima === null)
   ) {
     warnings.push(
-      `Subject ${subject.subject || index + 1}: Missing maxima values`
+      `Subject ${subject.subject || index + 1}: Missing maxima values`,
     );
   }
 
@@ -1604,7 +1673,7 @@ const validateSubject = (subject, index, errors, warnings) => {
     Object.values(secondSem).every((val) => val === null)
   ) {
     warnings.push(
-      `Subject ${subject.subject || index + 1}: No grades extracted`
+      `Subject ${subject.subject || index + 1}: No grades extracted`,
     );
   }
 
@@ -1626,7 +1695,7 @@ const validateMaxima = (subject, index, errors) => {
     errors.push(
       `Subject ${
         subject.subject || index + 1
-      }: Invalid period maxima (${periodMaxima}) - DRC system minimum is 10`
+      }: Invalid period maxima (${periodMaxima}) - DRC system minimum is 10`,
     );
   }
 
@@ -1634,7 +1703,7 @@ const validateMaxima = (subject, index, errors) => {
     errors.push(
       `Subject ${
         subject.subject || index + 1
-      }: Invalid exam maxima (${examMaxima}) - DRC system minimum is 10`
+      }: Invalid exam maxima (${examMaxima}) - DRC system minimum is 10`,
     );
   }
 
@@ -1642,7 +1711,7 @@ const validateMaxima = (subject, index, errors) => {
     errors.push(
       `Subject ${
         subject.subject || index + 1
-      }: Invalid total maxima (${totalMaxima}) - DRC system minimum is 10`
+      }: Invalid total maxima (${totalMaxima}) - DRC system minimum is 10`,
     );
   }
 };
@@ -1679,7 +1748,7 @@ const validateGradePatterns = (subject, index, warnings) => {
       warnings.push(
         `Subject ${
           subject.subject || index + 1
-        }: All grades are perfect multiples (suspicious pattern)`
+        }: All grades are perfect multiples (suspicious pattern)`,
       );
     }
 
@@ -1699,7 +1768,7 @@ const validateGradePatterns = (subject, index, warnings) => {
       warnings.push(
         `Subject ${
           subject.subject || index + 1
-        }: Suspiciously uniform grades with high confidence`
+        }: Suspiciously uniform grades with high confidence`,
       );
     }
   }
@@ -1721,7 +1790,7 @@ const validateGradeTypes = (subject, index, errors) => {
       errors.push(
         `Subject ${
           subject.subject || index + 1
-        }: ${field} (Sem 1) is not a number`
+        }: ${field} (Sem 1) is not a number`,
       );
     }
   });
@@ -1732,7 +1801,7 @@ const validateGradeTypes = (subject, index, errors) => {
       errors.push(
         `Subject ${
           subject.subject || index + 1
-        }: ${field} (Sem 2) is not a number`
+        }: ${field} (Sem 2) is not a number`,
       );
     }
   });
