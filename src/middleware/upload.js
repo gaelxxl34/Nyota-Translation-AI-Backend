@@ -34,16 +34,17 @@ const fileFilter = (req, file, cb) => {
     "image/png",
     "image/gif",
     "image/webp",
-  ]; // Removed PDF
+    "application/pdf", // PDF allowed for generalDocument type
+  ];
 
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
     cb(
       new Error(
-        `Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, GIF, WebP`
+        `Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, GIF, WebP, PDF`,
       ),
-      false
+      false,
     );
   }
 };

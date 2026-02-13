@@ -15,7 +15,7 @@ const { uploadAndExtractWithOpenAI } = require("./openai");
  * @param {string} formType - Type of form to process
  * @returns {Promise<Object>} Extraction result with data and metadata
  */
-const processDocument = async (filePath, formType = "form6") => {
+const processDocument = async (filePath, formType = "form6", options = {}) => {
   console.log(`🤖 AI Router: Processing ${formType} from ${filePath}`);
 
   try {
@@ -26,14 +26,17 @@ const processDocument = async (filePath, formType = "form6") => {
     }
 
     // Route everything else to OpenAI
-    console.log("📍 Routing to OpenAI GPT-4o (diploma/attestation extraction)");
+    console.log(
+      "📍 Routing to OpenAI GPT-4o (diploma/attestation/general document extraction)",
+    );
 
-    // Supported OpenAI types:
+    return await uploadAndExtractWithOpenAI(filePath, formType, options);
     // - stateDiploma
     // - bachelorDiploma
     // - collegeTranscript
     // - collegeAttestation
     // - highSchoolAttestation
+    // - generalDocument (PDF multi-page document translation)
     return await uploadAndExtractWithOpenAI(filePath, formType);
   } catch (error) {
     console.error(`❌ AI Router error for ${formType}:`, error.message);

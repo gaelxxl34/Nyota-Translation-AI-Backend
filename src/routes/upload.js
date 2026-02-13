@@ -22,7 +22,7 @@ const initializeAI = () => {
   processDocument = aiRouter.processDocument;
 
   console.log(
-    `🤖 AI System: ROUTER (Claude for bulletins, OpenAI for diplomas/attestations)`
+    `🤖 AI System: ROUTER (Claude for bulletins, OpenAI for diplomas/attestations)`,
   );
   isInitialized = true;
 };
@@ -36,7 +36,7 @@ const router = express.Router();
  */
 router.post("/", verifyToken, upload.single("file"), async (req, res) => {
   console.log(
-    `📥 Upload request received from ${req.user?.email || "unknown user"}`
+    `📥 Upload request received from ${req.user?.email || "unknown user"}`,
   );
 
   try {
@@ -73,15 +73,22 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       "bachelorDiploma",
       "highSchoolAttestation",
       "stateExamAttestation",
+      "generalDocument",
     ];
     if (!validFormTypes.includes(formType)) {
       console.warn(
-        `⚠️ Invalid form type received: ${formType}, defaulting to form6`
+        `⚠️ Invalid form type received: ${formType}, defaulting to form6`,
       );
       formType = "form6";
     }
 
     console.log(`  - Form type: ${formType}`);
+
+    // Extract target language for general document translation
+    const targetLanguage = req.body.targetLanguage || "english";
+    if (formType === "generalDocument") {
+      console.log(`  - Target language: ${targetLanguage}`);
+    }
 
     try {
       // Process the file with AI (routes to appropriate provider)
@@ -91,12 +98,12 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       const processingTimeout = new Promise((_, reject) => {
         setTimeout(
           () => reject(new Error("AI processing timeout after 4 minutes")),
-          240000
+          240000,
         );
       });
 
       const extractionResult = await Promise.race([
-        processDocument(req.file.path, formType),
+        processDocument(req.file.path, formType, { targetLanguage }),
         processingTimeout,
       ]);
 
@@ -109,7 +116,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         extractionResult.data
       ) {
         console.log(
-          `🔧 Applying fixed English values for college transcript...`
+          `🔧 Applying fixed English values for college transcript...`,
         );
 
         // Override country to uppercase English
@@ -135,7 +142,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         const storagePath = generateStoragePath(
           req.user.uid,
           formType,
-          req.file.originalname
+          req.file.originalname,
         );
 
         storageResult = await uploadToStorage(req.file.path, storagePath, {
@@ -147,16 +154,16 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
 
         if (storageResult.success) {
           console.log(
-            `☁️ File uploaded to Firebase Storage: ${storageResult.storagePath}`
+            `☁️ File uploaded to Firebase Storage: ${storageResult.storagePath}`,
           );
         } else {
           console.warn(
-            `⚠️ Failed to upload to Firebase Storage: ${storageResult.error}`
+            `⚠️ Failed to upload to Firebase Storage: ${storageResult.error}`,
           );
         }
       } catch (storageError) {
         console.warn(
-          `⚠️ Firebase Storage upload error: ${storageError.message}`
+          `⚠️ Firebase Storage upload error: ${storageError.message}`,
         );
       }
 
@@ -210,6 +217,8 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             localFilePath: req.file.path, // Keep for fallback/debugging
             status: extractionResult.success ? "processed" : "failed",
             formType: formType, // Add form type to metadata
+            targetLanguage:
+              formType === "generalDocument" ? targetLanguage : null,
             studentName:
               extractionResult.success && cleanedData?.studentName
                 ? cleanedData.studentName
@@ -235,7 +244,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             extractionResult.success
               ? extractionResult.data?.studentName
               : "N/A"
-          }`
+          }`,
         );
 
         // Create initial version in subcollection (avoids array timestamp issues)
@@ -258,7 +267,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         console.log(`✅ Saved OpenAI results to Firestore: ${firestoreDocId}`);
       } catch (firestoreError) {
         console.warn(
-          `⚠️ Failed to save to Firestore: ${firestoreError.message}`
+          `⚠️ Failed to save to Firestore: ${firestoreError.message}`,
         );
         console.error("Firestore error details:", firestoreError);
       }
@@ -270,7 +279,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           console.log(`🧹 Local file cleaned up after successful cloud upload`);
         } catch (cleanupError) {
           console.warn(
-            `⚠️ Failed to clean up local file: ${cleanupError.message}`
+            `⚠️ Failed to clean up local file: ${cleanupError.message}`,
           );
         }
       }
@@ -304,7 +313,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     } catch (openaiError) {
       console.error(
         `🚨 AI processing failed for ${req.user.email}:`,
-        openaiError.message
+        openaiError.message,
       );
 
       // Determine if this is a timeout error
@@ -321,7 +330,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         const storagePath = generateStoragePath(
           req.user.uid,
           formType,
-          req.file.originalname
+          req.file.originalname,
         );
         errorStorageResult = await uploadToStorage(req.file.path, storagePath, {
           contentType: req.file.mimetype,
@@ -334,7 +343,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         }
       } catch (storageErr) {
         console.warn(
-          `⚠️ Storage upload failed during error handling: ${storageErr.message}`
+          `⚠️ Storage upload failed during error handling: ${storageErr.message}`,
         );
       }
 

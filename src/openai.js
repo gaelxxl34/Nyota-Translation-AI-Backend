@@ -80,9 +80,10 @@ const prepareFileForProcessing = (filePath) => {
 /**
  * Get system prompt based on form type
  * @param {string} formType - The form type ('stateDiploma', 'form4', 'form6')
+ * @param {Object} options - Additional options (e.g., targetLanguage)
  * @returns {string} System prompt for OpenAI
  */
-const getSystemPrompt = (formType) => {
+const getSystemPrompt = (formType, options = {}) => {
   if (formType === "stateDiploma") {
     return `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) State Diploma document analysis with 15+ years of experience. You specialize in extracting information from official State Examination Certificates.
 
@@ -662,6 +663,92 @@ Return data in this exact JSON format:
 }`;
   }
 
+  // General Document - PDF multi-page translation
+  if (formType === "generalDocument") {
+    const lang = options.targetLanguage || "english";
+    const langLabel =
+      lang === "french"
+        ? "French"
+        : lang === "swahili"
+          ? "Kiswahili (Swahili)"
+          : "English";
+    return `You are an EXPERT multilingual document translator and content extractor. You specialize in reading documents (PDFs, scanned documents, forms, surveys, research papers, consent forms, etc.) and translating them from any language to ${langLabel} while PERFECTLY preserving the document's structure.
+
+🎯 YOUR MISSION:
+Read this document, identify its structure (headings, paragraphs, lists, tables, checkboxes, form fields, etc.), translate ALL text content to ${langLabel}, and return a structured JSON representation that preserves the original layout.
+
+📋 CONTENT BLOCK TYPES YOU MUST IDENTIFY:
+- "heading": Section titles/headers (with level 1-4)
+- "paragraph": Regular text paragraphs
+- "orderedList": Numbered lists (1., 2., 3., etc. or a., b., c., etc.)
+- "unorderedList": Bullet point lists
+- "checkboxList": Checkbox items (☐ / ☑ / □ / ■ / ○ / ●)
+- "table": Tabular data with rows and optional headers
+- "blockquote": Quoted text, highlighted text, or emphasized blocks
+- "divider": Horizontal lines / section separators
+- "link": URLs or hyperlinks
+- "caption": Small print, footnotes, or captions
+
+🔍 EXTRACTION RULES:
+1. Process the document PAGE BY PAGE - each physical page becomes a separate page object
+2. Within each page, extract content blocks IN THE EXACT ORDER they appear
+3. TRANSLATE all text content to ${langLabel} (except proper names, URLs, email addresses)
+4. Preserve numbered list numbering and ordering
+5. For checkboxes: detect whether they are checked or unchecked
+6. For tables: extract headers separately from data rows
+7. Bold/italic/highlighted text should be marked with the appropriate flags
+8. Section numbers in headings should be preserved (e.g., "Section 1:", "Part A:")
+9. If text appears highlighted or in a colored background, mark it as highlighted
+10. Preserve the hierarchical structure (main headings vs sub-headings)
+
+🌍 TRANSLATION GUIDELINES:
+- Translate ALL text from the source language to ${langLabel}
+- Keep proper names (people, organizations, places) as-is
+- Keep email addresses, URLs, phone numbers as-is
+- Keep ALL numbers, dates, numeric values, percentages, and scores EXACTLY as they appear (do NOT translate or convert numbers)
+- Preserve ordered list numbering exactly (1., 2., 3. or a., b., c.) - only translate the text content, NOT the numbers/letters
+- Preserve all reference numbers, codes, IDs, and form field identifiers as-is
+- Translate form labels, instructions, questions, and options
+- For academic/legal terms, use standard ${langLabel} equivalents
+- Keep units of measurement symbols as-is (kg, cm, %, etc.)
+- Keep table cell values that are purely numeric as-is
+
+⚠️ IMPORTANT:
+- If the document has multiple pages, create a separate page object for each
+- If you cannot determine the page break, use logical section breaks
+- Do NOT skip any content - extract EVERYTHING visible in the document
+- Checkbox state detection: ☑/■/● = checked, ☐/□/○ = unchecked
+
+Return data in this EXACT JSON format:
+{
+  "documentTitle": "string - main title of the document in ${langLabel}",
+  "documentSubtitle": "string or null - subtitle if present",
+  "documentType": "string - e.g., 'Research Form', 'Consent Form', 'Survey', 'Certificate', 'Letter', 'Report', etc.",
+  "sourceLanguage": "string - detected source language (e.g., 'French', 'Spanish')",
+  "targetLanguage": "${langLabel}",
+  "author": "string or null - document author if visible",
+  "organization": "string or null - issuing organization if visible",
+  "date": "string or null - document date if visible",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "blocks": [
+        { "type": "heading", "level": 1, "text": "Main Title in ${langLabel}" },
+        { "type": "paragraph", "text": "Translated paragraph text...", "italic": false, "bold": false },
+        { "type": "unorderedList", "items": ["First bullet point", "Second bullet point"] },
+        { "type": "orderedList", "items": ["First numbered item", "Second numbered item"] },
+        { "type": "checkboxList", "checkboxItems": [{"label": "Option A", "checked": true}, {"label": "Option B", "checked": false}] },
+        { "type": "table", "headers": ["Column 1", "Column 2"], "rows": [["Cell 1", "Cell 2"]] },
+        { "type": "blockquote", "text": "Emphasized or quoted text", "highlighted": true },
+        { "type": "divider" },
+        { "type": "link", "url": "https://example.com", "linkText": "Click here" },
+        { "type": "caption", "text": "Small print or footnote text" }
+      ]
+    }
+  ]
+}`;
+  }
+
   // Default bulletin system prompt for form4/form6
   return `You are a SENIOR EXPERT in DRC (Democratic Republic of Congo) French school bulletin translation with 15+ years of experience.
 
@@ -901,7 +988,7 @@ Return ONLY clean JSON with ALL subjects in English and ALL summary values extra
  * @param {string} formType - The form type ('stateDiploma', 'form4', 'form6')
  * @returns {string} User prompt for OpenAI
  */
-const getUserPrompt = (formType) => {
+const getUserPrompt = (formType, options = {}) => {
   if (formType === "stateDiploma") {
     return `As a senior DRC State Diploma expert, analyze this official State Examination Certificate and extract all visible information accurately.
 
@@ -1094,6 +1181,47 @@ Analyze this College Transcript and return the extracted data in the specified J
 Analyze this College Attestation and return the extracted data in the specified JSON format with ALL French text translated to English except proper nouns.`;
   }
 
+  // General Document - multi-page PDF translation
+  if (formType === "generalDocument") {
+    const lang = options.targetLanguage || "english";
+    const langLabel =
+      lang === "french"
+        ? "French"
+        : lang === "swahili"
+          ? "Kiswahili (Swahili)"
+          : "English";
+    return `Analyze this document carefully. This could be any type of document: a research form, consent form, survey, letter, certificate, report, or any other multi-page document.
+
+🎯 YOUR TASK:
+1. Read EVERY page of the document thoroughly
+2. Identify the document structure: titles, sections, paragraphs, lists, tables, checkboxes, links, etc.
+3. Translate ALL text content to ${langLabel} (keep proper names, emails, URLs, phone numbers as-is)
+4. Return a structured JSON with content organized by pages and content blocks
+
+📋 STEP-BY-STEP PROCESS:
+1. First, identify the document title and metadata (author, organization, date, type)
+2. Then process each page top-to-bottom:
+   - Identify headings and their hierarchy (H1, H2, H3, H4)
+   - Extract paragraphs preserving their order
+   - Identify numbered lists (1., 2., 3. or a., b., c.)
+   - Identify bullet point lists
+   - Detect checkboxes and their checked/unchecked state
+   - Extract tables with headers and rows
+   - Note any highlighted/emphasized text
+   - Capture links and their text
+   - Note section dividers/horizontal rules
+
+⚠️ CRITICAL RULES:
+- Do NOT skip any content
+- Preserve the exact order of content as it appears
+- For checkboxes: ☑/■/●/✓ = checked: true, ☐/□/○ = checked: false
+- For highlighted text (yellow background, colored text, underlined emphasis): set "highlighted": true
+- Translate ALL content to ${langLabel} except proper nouns, URLs, emails
+- If the document has form fields with blanks (___), preserve them as "(blank)" in the text
+- For multiple-choice questions, use checkboxList type
+- Return ONLY clean JSON with NO markdown formatting around it`;
+  }
+
   // Default bulletin user prompt for form4/form6
   return `As a senior DRC education expert, extract this bulletin with MANDATORY translation:
 
@@ -1126,14 +1254,44 @@ Return ONLY clean JSON with ALL subjects in English.`;
  * @param {string} formType - Form type
  * @returns {Promise<string>} OpenAI response content
  */
-const callOpenAIAPI = async (fileData, formType) => {
+const callOpenAIAPI = async (fileData, formType, options = {}) => {
   const openai = initializeOpenAI();
-  const systemPrompt = getSystemPrompt(formType);
-  const userPrompt = getUserPrompt(formType);
+  const systemPrompt = getSystemPrompt(formType, options);
+  const userPrompt = getUserPrompt(formType, options);
+
+  const isPDF = fileData.fileExtension === ".pdf";
 
   console.log(
-    `📤 Processing ${fileData.fileExtension} file with OpenAI Vision API...`,
+    `📤 Processing ${fileData.fileExtension} file with OpenAI ${isPDF ? "File API" : "Vision API"}...`,
   );
+
+  // Build the user content array based on file type
+  const userContent = [
+    {
+      type: "text",
+      text: userPrompt,
+    },
+  ];
+
+  if (isPDF) {
+    // For PDFs, use OpenAI's file input type (supported by GPT-4o)
+    userContent.push({
+      type: "file",
+      file: {
+        filename: fileData.filename,
+        file_data: `data:${fileData.mimeType};base64,${fileData.base64File}`,
+      },
+    });
+  } else {
+    // For images, use image_url type
+    userContent.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${fileData.mimeType};base64,${fileData.base64File}`,
+        detail: "high", // Maximum detail for OCR accuracy
+      },
+    });
+  }
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o", // Using full GPT-4o for maximum accuracy
@@ -1144,22 +1302,10 @@ const callOpenAIAPI = async (fileData, formType) => {
       },
       {
         role: "user",
-        content: [
-          {
-            type: "text",
-            text: userPrompt,
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${fileData.mimeType};base64,${fileData.base64File}`,
-              detail: "high", // Maximum detail for OCR accuracy
-            },
-          },
-        ],
+        content: userContent,
       },
     ],
-    max_tokens: 8000,
+    max_tokens: 16000, // Higher token limit for multi-page PDFs
     temperature: 0.0, // Zero temperature for maximum consistency
     top_p: 0.1, // Very focused sampling
     frequency_penalty: 0.0,
@@ -1233,6 +1379,8 @@ const processExtractedData = (extractedData, formType) => {
     validationResult = validateStateDiploma(extractedData);
   } else if (formType === "stateExamAttestation") {
     validationResult = validateStateExamAttestation(extractedData);
+  } else if (formType === "generalDocument") {
+    validationResult = validateGeneralDocument(extractedData);
   } else {
     validationResult = validateBulletin(extractedData, formType);
   }
@@ -1346,8 +1494,12 @@ const handleOpenAIError = (error) => {
 const uploadAndExtractWithOpenAI = async (
   filePath,
   formType = "stateDiploma",
+  options = {},
 ) => {
   console.log(`🤖 OpenAI GPT-4o: Processing ${formType} from ${filePath}`);
+  if (options.targetLanguage) {
+    console.log(`🌍 Target language: ${options.targetLanguage}`);
+  }
 
   try {
     // Step 1: Prepare file for processing
@@ -1357,7 +1509,7 @@ const uploadAndExtractWithOpenAI = async (
     );
 
     // Step 2: Call OpenAI API
-    const aiResponse = await callOpenAIAPI(fileData, formType);
+    const aiResponse = await callOpenAIAPI(fileData, formType, options);
 
     // Step 3: Parse response
     const extractedData = parseOpenAIResponse(aiResponse);
@@ -1550,6 +1702,60 @@ const validateStateExamAttestation = (data) => {
     hasMinimumData,
     extractionQuality,
     subjectCount: 0, // State exam attestations don't have subjects
+  };
+};
+
+/**
+ * Validate General Document extracted data
+ * @param {Object} data - The extracted general document data
+ * @returns {Object} Validation result with errors and warnings
+ */
+const validateGeneralDocument = (data) => {
+  const errors = [];
+  const warnings = [];
+  const required = [];
+
+  console.log("🔍 Starting General Document validation...");
+
+  if (!data.documentTitle) {
+    warnings.push("Document title not extracted");
+  }
+  if (!data.pages || !Array.isArray(data.pages) || data.pages.length === 0) {
+    errors.push("No pages extracted from document");
+  } else {
+    let totalBlocks = 0;
+    data.pages.forEach((page, i) => {
+      if (!page.blocks || !Array.isArray(page.blocks)) {
+        warnings.push(`Page ${i + 1} has no content blocks`);
+      } else {
+        totalBlocks += page.blocks.length;
+      }
+    });
+    if (totalBlocks === 0) {
+      errors.push("No content blocks extracted from any page");
+    }
+    console.log(
+      `📊 Extracted ${data.pages.length} pages with ${totalBlocks} total content blocks`,
+    );
+  }
+
+  const hasMinimumData = data.pages && data.pages.length > 0;
+  const extractionQuality = hasMinimumData ? "good" : "poor";
+
+  console.log(
+    "✅ General Document validation complete:",
+    errors.length === 0 ? "PASS" : "FAIL",
+  );
+
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings,
+    missingRequired: required,
+    hasMinimumData,
+    extractionQuality,
+    subjectCount: 0,
+    pageCount: data.pages ? data.pages.length : 0,
   };
 };
 
@@ -1884,6 +2090,7 @@ module.exports = {
   parseOpenAIResponse,
   processExtractedData,
   validateStateDiploma,
+  validateGeneralDocument,
   validateBulletin,
   validateSubject,
   validateMaxima,
