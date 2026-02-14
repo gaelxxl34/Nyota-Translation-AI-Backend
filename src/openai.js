@@ -670,7 +670,7 @@ Return data in this exact JSON format:
       lang === "french"
         ? "French"
         : lang === "swahili"
-          ? "Kiswahili (Swahili)"
+          ? "Kiswahili Safi (the Swahili variant spoken in the Democratic Republic of Congo)"
           : "English";
     return `You are an EXPERT multilingual document translator and content extractor. You specialize in reading documents (PDFs, scanned documents, forms, surveys, research papers, consent forms, etc.) and translating them from any language to ${langLabel} while PERFECTLY preserving the document's structure.
 
@@ -718,6 +718,14 @@ Read this document, identify its structure (headings, paragraphs, lists, tables,
 - If you cannot determine the page break, use logical section breaks
 - Do NOT skip any content - extract EVERYTHING visible in the document
 - Checkbox state detection: ☑/■/● = checked, ☐/□/○ = unchecked
+
+🚨 ZERO CONTENT LOSS POLICY (MANDATORY):
+- You MUST include EVERY SINGLE paragraph, sentence, and line from the original document. No exceptions.
+- Do NOT summarize, shorten, merge, or omit any paragraph no matter how repetitive, long, or similar it may seem.
+- If the original document has 50 paragraphs, your output MUST have 50 paragraphs. Count them.
+- Even small text like footnotes, disclaimers, page headers, form instructions, or fine print MUST be included.
+- If a paragraph is very long, translate it in FULL - do NOT truncate or abbreviate it.
+- Before returning your response, mentally verify: "Did I include every single line of text from every page?" If not, go back and add the missing content.
 
 Return data in this EXACT JSON format:
 {
@@ -1188,7 +1196,7 @@ Analyze this College Attestation and return the extracted data in the specified 
       lang === "french"
         ? "French"
         : lang === "swahili"
-          ? "Kiswahili (Swahili)"
+          ? "Kiswahili Safi (the Swahili variant spoken in the Democratic Republic of Congo)"
           : "English";
     return `Analyze this document carefully. This could be any type of document: a research form, consent form, survey, letter, certificate, report, or any other multi-page document.
 
@@ -1212,13 +1220,15 @@ Analyze this College Attestation and return the extracted data in the specified 
    - Note section dividers/horizontal rules
 
 ⚠️ CRITICAL RULES:
-- Do NOT skip any content
+- Do NOT skip any content - EVERY paragraph, EVERY line, EVERY sentence must be included
+- Do NOT summarize, shorten, or merge paragraphs. If the original has 10 paragraphs on a page, output 10 paragraphs.
 - Preserve the exact order of content as it appears
 - For checkboxes: ☑/■/●/✓ = checked: true, ☐/□/○ = checked: false
 - For highlighted text (yellow background, colored text, underlined emphasis): set "highlighted": true
 - Translate ALL content to ${langLabel} except proper nouns, URLs, emails
 - If the document has form fields with blanks (___), preserve them as "(blank)" in the text
 - For multiple-choice questions, use checkboxList type
+- Include footnotes, disclaimers, fine print, page headers - absolutely nothing should be left out
 - Return ONLY clean JSON with NO markdown formatting around it`;
   }
 

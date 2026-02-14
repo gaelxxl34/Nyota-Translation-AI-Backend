@@ -30,14 +30,13 @@ const processDocument = async (filePath, formType = "form6", options = {}) => {
       "📍 Routing to OpenAI GPT-4o (diploma/attestation/general document extraction)",
     );
 
-    return await uploadAndExtractWithOpenAI(filePath, formType, options);
     // - stateDiploma
     // - bachelorDiploma
     // - collegeTranscript
     // - collegeAttestation
     // - highSchoolAttestation
     // - generalDocument (PDF multi-page document translation)
-    return await uploadAndExtractWithOpenAI(filePath, formType);
+    return await uploadAndExtractWithOpenAI(filePath, formType, options);
   } catch (error) {
     console.error(`❌ AI Router error for ${formType}:`, error.message);
     throw error;

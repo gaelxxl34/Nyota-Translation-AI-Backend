@@ -54,8 +54,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-    files: 1, // Only allow single file upload
+    fileSize: 10 * 1024 * 1024, // 10MB limit per file
   },
 });
 
@@ -72,7 +71,7 @@ const handleMulterError = (error, req, res, next) => {
       case "LIMIT_FILE_COUNT":
         return res.status(400).json({
           error: "Too many files",
-          details: "Only one file can be uploaded at a time",
+          details: "Maximum 20 files can be uploaded at a time",
           code: "TOO_MANY_FILES",
         });
       case "LIMIT_UNEXPECTED_FILE":

@@ -405,4 +405,379 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
 // Apply multer error handling middleware
 router.use(handleMulterError);
 
+/**
+ * POST /api/upload/multi
+ * Upload multiple images/pages for a generalDocument
+ * Processes each file through AI, merges all extracted pages into one document
+ * Saves the combined result to Firestore
+ */
+router.post(
+  "/multi",
+  verifyToken,
+  upload.array("files", 20),
+  async (req, res) => {
+    console.log(
+      `📥 Multi-upload request from ${req.user?.email || "unknown"} — ${req.files?.length || 0} files`,
+    );
+
+    try {
+      initializeAI();
+
+      if (!req.files || req.files.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "No files uploaded", code: "NO_FILE" });
+      }
+
+      const targetLanguage = req.body.targetLanguage || "english";
+      const formType = "generalDocument";
+
+      console.log(`  - Files: ${req.files.length}`);
+      console.log(`  - Target language: ${targetLanguage}`);
+
+      // Process each file sequentially through AI and collect pages
+      const allPages = [];
+      let combinedTitle = null;
+      let combinedType = null;
+      let combinedSubtitle = null;
+      let combinedAuthor = null;
+      let combinedOrganization = null;
+      let combinedDate = null;
+      let combinedSourceLanguage = null;
+
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+        console.log(
+          `  📄 Processing file ${i + 1}/${req.files.length}: ${file.originalname}`,
+        );
+
+        try {
+          const processingTimeout = new Promise((_, reject) => {
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `AI processing timeout for file ${i + 1} after 4 minutes`,
+                  ),
+                ),
+              240000,
+            );
+          });
+
+          const extractionResult = await Promise.race([
+            processDocument(file.path, formType, { targetLanguage }),
+            processingTimeout,
+          ]);
+
+          if (extractionResult.success && extractionResult.data) {
+            const data = extractionResult.data;
+
+            // Use metadata from first successfully processed file
+            if (!combinedTitle && data.documentTitle)
+              combinedTitle = data.documentTitle;
+            if (!combinedType && data.documentType)
+              combinedType = data.documentType;
+            if (!combinedSubtitle && data.documentSubtitle)
+              combinedSubtitle = data.documentSubtitle;
+            if (!combinedAuthor && data.author) combinedAuthor = data.author;
+            if (!combinedOrganization && data.organization)
+              combinedOrganization = data.organization;
+            if (!combinedDate && data.date) combinedDate = data.date;
+            if (!combinedSourceLanguage && data.sourceLanguage)
+              combinedSourceLanguage = data.sourceLanguage;
+
+            // Collect pages with sequential numbering
+            if (data.pages && data.pages.length > 0) {
+              for (const page of data.pages) {
+                allPages.push({
+                  ...page,
+                  pageNumber: allPages.length + 1,
+                });
+              }
+            }
+
+            console.log(
+              `  ✅ File ${i + 1}: extracted ${data.pages?.length || 0} page(s)`,
+            );
+          } else {
+            console.warn(
+              `  ⚠️ File ${i + 1}: extraction failed or returned no data`,
+            );
+          }
+        } catch (fileError) {
+          console.error(
+            `  ❌ File ${i + 1} processing error: ${fileError.message}`,
+          );
+          // Continue with remaining files
+        }
+      }
+
+      if (allPages.length === 0) {
+        // Clean up all files
+        for (const file of req.files) {
+          deleteLocalFile(file.path);
+        }
+        return res.status(422).json({
+          error: "Failed to extract content from any uploaded file",
+          code: "EXTRACTION_FAILED",
+        });
+      }
+
+      // Build the combined extraction result
+      const combinedData = {
+        documentTitle: combinedTitle || "Translated Document",
+        documentSubtitle: combinedSubtitle || null,
+        documentType: combinedType || "General Document",
+        sourceLanguage: combinedSourceLanguage || null,
+        targetLanguage: targetLanguage,
+        author: combinedAuthor || null,
+        organization: combinedOrganization || null,
+        date: combinedDate || null,
+        pages: allPages,
+        totalPages: allPages.length,
+        formType: formType,
+      };
+
+      const extractionResult = {
+        success: true,
+        data: combinedData,
+      };
+
+      console.log(
+        `✅ Multi-upload AI processing complete: ${allPages.length} total pages from ${req.files.length} files`,
+      );
+
+      // Upload first file to Firebase Storage as representative
+      let storageResult = { success: false };
+      try {
+        const storagePath = generateStoragePath(
+          req.user.uid,
+          formType,
+          req.files[0].originalname,
+        );
+
+        storageResult = await uploadToStorage(req.files[0].path, storagePath, {
+          contentType: req.files[0].mimetype,
+          originalName: req.files[0].originalname,
+          userId: req.user.uid,
+          formType: formType,
+        });
+
+        if (storageResult.success) {
+          console.log(
+            `☁️ File uploaded to Firebase Storage: ${storageResult.storagePath}`,
+          );
+        }
+      } catch (storageError) {
+        console.warn(
+          `⚠️ Firebase Storage upload error: ${storageError.message}`,
+        );
+      }
+
+      // Save combined results to Firestore
+      let firestoreDocId = null;
+      try {
+        const admin = require("firebase-admin");
+        const db = admin.firestore();
+
+        firestoreDocId = `bulletin_${req.user.uid}_${Date.now()}`;
+
+        // Clean data to remove undefined values
+        const cleanDataForFirestore = (data) => {
+          if (data === null || data === undefined) return null;
+          if (typeof data !== "object") return data;
+          if (Array.isArray(data))
+            return data.map((item) => cleanDataForFirestore(item));
+          const cleaned = {};
+          for (const [key, value] of Object.entries(data)) {
+            if (value !== undefined) {
+              cleaned[key] = cleanDataForFirestore(value);
+            }
+          }
+          return cleaned;
+        };
+
+        const cleanedData = cleanDataForFirestore(combinedData);
+
+        const bulletinDoc = {
+          id: firestoreDocId,
+          userId: req.user.uid,
+          userEmail: req.user.email,
+          originalData: cleanedData,
+          editedData: cleanedData,
+          metadata: {
+            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastModified: admin.firestore.FieldValue.serverTimestamp(),
+            fileName: req.files.map((f) => f.originalname).join(", "),
+            fileSize: req.files.reduce((sum, f) => sum + f.size, 0),
+            fileCount: req.files.length,
+            storageUrl: storageResult.success ? storageResult.url : null,
+            storagePath: storageResult.success
+              ? storageResult.storagePath
+              : null,
+            storageBucket: storageResult.success ? storageResult.bucket : null,
+            status: "processed",
+            formType: formType,
+            targetLanguage: targetLanguage,
+            studentName: combinedTitle || "General Document",
+            createdAt: new Date().toISOString(),
+            lastModifiedAt: new Date().toISOString(),
+          },
+          versionCount: 1,
+          currentVersion: 1,
+          tags: [],
+          isActive: true,
+        };
+
+        await db.collection("bulletins").doc(firestoreDocId).set(bulletinDoc);
+
+        if (cleanedData) {
+          await db
+            .collection("bulletins")
+            .doc(firestoreDocId)
+            .collection("versions")
+            .add({
+              versionNumber: 1,
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              data: cleanedData,
+              changeType: "initial_upload",
+              formType: formType,
+              createdAt: new Date().toISOString(),
+              userId: req.user.uid,
+            });
+        }
+
+        console.log(
+          `✅ Saved multi-upload document to Firestore: ${firestoreDocId}`,
+        );
+      } catch (firestoreError) {
+        console.warn(
+          `⚠️ Failed to save to Firestore: ${firestoreError.message}`,
+        );
+      }
+
+      // Clean up all local files
+      for (const file of req.files) {
+        try {
+          await deleteLocalFile(file.path);
+        } catch (cleanupError) {
+          console.warn(`⚠️ Cleanup failed for ${file.originalname}`);
+        }
+      }
+
+      res.status(200).json({
+        message: "Files uploaded and processed successfully",
+        file: {
+          fileCount: req.files.length,
+          filenames: req.files.map((f) => f.originalname),
+          totalSize: req.files.reduce((sum, f) => sum + f.size, 0),
+          formType: formType,
+          storageUrl: storageResult.success ? storageResult.url : null,
+          storagePath: storageResult.success ? storageResult.storagePath : null,
+        },
+        user: {
+          uid: req.user.uid,
+          email: req.user.email,
+        },
+        processing: {
+          ...extractionResult,
+          firestoreId: firestoreDocId,
+          formType: formType,
+          totalPages: allPages.length,
+        },
+        firestoreId: firestoreDocId,
+        formType: formType,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("🚨 Multi-upload processing failed:", error.message);
+
+      // Clean up all files on error
+      if (req.files) {
+        for (const file of req.files) {
+          deleteLocalFile(file.path);
+        }
+      }
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Failed to process multi-file upload",
+          details: error.message,
+          code: "PROCESSING_ERROR",
+        });
+      }
+    }
+  },
+);
+
+/**
+ * POST /api/upload/extract-page
+ * Extract content from an uploaded image/screenshot using AI
+ * Returns structured blocks without saving to Firestore
+ * Used to append additional pages to an existing generalDocument
+ */
+router.post(
+  "/extract-page",
+  verifyToken,
+  upload.single("file"),
+  async (req, res) => {
+    console.log(`📸 Extract-page request from ${req.user?.email || "unknown"}`);
+
+    try {
+      initializeAI();
+
+      if (!req.file) {
+        return res
+          .status(400)
+          .json({ error: "No file uploaded", code: "NO_FILE" });
+      }
+
+      const targetLanguage = req.body.targetLanguage || "english";
+      console.log(`  - File: ${req.file.originalname} (${req.file.mimetype})`);
+      console.log(`  - Target language: ${targetLanguage}`);
+
+      // Process image with AI as generalDocument
+      const processingTimeout = new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error("AI processing timeout after 4 minutes")),
+          240000,
+        );
+      });
+
+      const extractionResult = await Promise.race([
+        processDocument(req.file.path, "generalDocument", { targetLanguage }),
+        processingTimeout,
+      ]);
+
+      // Clean up the uploaded file
+      deleteLocalFile(req.file.path);
+
+      if (!extractionResult.success || !extractionResult.data) {
+        return res.status(422).json({
+          error: "Failed to extract content from image",
+          code: "EXTRACTION_FAILED",
+        });
+      }
+
+      // Return just the extracted pages/blocks
+      const data = extractionResult.data;
+      res.status(200).json({
+        success: true,
+        pages: data.pages || [],
+        documentTitle: data.documentTitle || null,
+        documentType: data.documentType || null,
+      });
+    } catch (error) {
+      console.error("🚨 Extract-page failed:", error.message);
+      // Clean up file on error
+      if (req.file) deleteLocalFile(req.file.path);
+      res.status(500).json({
+        error: "Failed to extract page content",
+        details: error.message,
+        code: "PROCESSING_ERROR",
+      });
+    }
+  },
+);
+
 module.exports = router;
