@@ -28,6 +28,7 @@ const collegeTranscriptPdfRoutes = require("./routes/collegeTranscriptPdf");
 const collegeAttestationPdfRoutes = require("./routes/collegeAttestationPdf");
 const highSchoolAttestationPdfRoutes = require("./routes/highSchoolAttestationPdf");
 const qrRoutes = require("./routes/qr");
+const verifyRoutes = require("./routes/verify");
 
 const app = express();
 
@@ -44,7 +45,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // Request logging middleware
@@ -52,7 +53,7 @@ app.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path} - ${new Date().toISOString()}`);
   if (req.headers.authorization) {
     console.log(
-      `🔐 Auth header present: ${req.headers.authorization.substring(0, 20)}...`
+      `🔐 Auth header present: ${req.headers.authorization.substring(0, 20)}...`,
     );
   }
   next();
@@ -92,6 +93,7 @@ app.use("/api", collegeTranscriptPdfRoutes);
 app.use("/api", collegeAttestationPdfRoutes);
 app.use("/api", highSchoolAttestationPdfRoutes);
 app.use("/api/qr", qrRoutes); // QR code generation routes (public - no auth required)
+app.use("/api/verify", verifyRoutes); // Document verification routes (public - no auth required)
 app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
 app.use("/api", verifyToken, dashboardRoutes); // Protected dashboard routes
 app.use("/api/admin", adminRoutes); // Admin routes (auth handled inside routes)
