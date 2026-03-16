@@ -3,6 +3,7 @@
 
 const admin = require("firebase-admin");
 const { ROLES, ROLE_HIERARCHY } = require("../middleware/rbac");
+const { cache, TTL, keys } = require("./cache");
 
 /**
  * Get Firestore database instance
@@ -16,19 +17,21 @@ const getDb = () => admin.firestore();
  * @returns {Promise<Object|null>}
  */
 const getUserById = async (uid) => {
-  try {
-    const db = getDb();
-    const userDoc = await db.collection("users").doc(uid).get();
+  return cache.getOrSet(keys.user(uid), TTL.USER, async () => {
+    try {
+      const db = getDb();
+      const userDoc = await db.collection("users").doc(uid).get();
 
-    if (!userDoc.exists) {
-      return null;
+      if (!userDoc.exists) {
+        return null;
+      }
+
+      return { id: userDoc.id, ...userDoc.data() };
+    } catch (error) {
+      console.error(`❌ Error fetching user ${uid}:`, error);
+      throw error;
     }
-
-    return { id: userDoc.id, ...userDoc.data() };
-  } catch (error) {
-    console.error(`❌ Error fetching user ${uid}:`, error);
-    throw error;
-  }
+  });
 };
 
 /**
@@ -37,24 +40,27 @@ const getUserById = async (uid) => {
  * @returns {Promise<Object|null>}
  */
 const getUserByEmail = async (email) => {
-  try {
-    const db = getDb();
-    const snapshot = await db
-      .collection("users")
-      .where("email", "==", email)
-      .limit(1)
-      .get();
+  const cacheKey = `user:email:${email}`;
+  return cache.getOrSet(cacheKey, TTL.USER, async () => {
+    try {
+      const db = getDb();
+      const snapshot = await db
+        .collection("users")
+        .where("email", "==", email)
+        .limit(1)
+        .get();
 
-    if (snapshot.empty) {
-      return null;
+      if (snapshot.empty) {
+        return null;
+      }
+
+      const doc = snapshot.docs[0];
+      return { id: doc.id, ...doc.data() };
+    } catch (error) {
+      console.error(`❌ Error fetching user by email ${email}:`, error);
+      throw error;
     }
-
-    const doc = snapshot.docs[0];
-    return { id: doc.id, ...doc.data() };
-  } catch (error) {
-    console.error(`❌ Error fetching user by email ${email}:`, error);
-    throw error;
-  }
+  });
 };
 
 /**
@@ -85,6 +91,10 @@ const createOrUpdateUser = async (uid, userData, createdBy = null) => {
 
       await userRef.update(updateData);
       console.log(`✅ Updated user: ${userData.email || uid}`);
+
+      // Invalidate user cache
+      await cache.del(keys.user(uid));
+      if (userData.email) await cache.del(`user:email:${userData.email}`);
 
       const updated = await userRef.get();
       return { id: updated.id, ...updated.data() };
@@ -117,6 +127,9 @@ const createOrUpdateUser = async (uid, userData, createdBy = null) => {
       console.log(
         `✅ Created user: ${newUser.email || uid} with role: ${newUser.role}`
       );
+
+      // Invalidate user stats cache on new user creation
+      await cache.del(keys.userStats());
 
       return { id: uid, ...newUser };
     }
@@ -166,6 +179,10 @@ const updateUserRole = async (uid, newRole, assignedBy) => {
     // Also update Firebase Auth custom claims for role
     await admin.auth().setCustomUserClaims(uid, { role: newRole });
     console.log(`✅ Updated custom claims for ${uid}`);
+
+    // Invalidate cached user data
+    await cache.del(keys.user(uid));
+    await cache.del(keys.userStats());
 
     const updated = await userRef.get();
     return { id: updated.id, ...updated.data() };
@@ -266,6 +283,10 @@ const deactivateUser = async (uid, deactivatedBy) => {
 
     console.log(`✅ Deactivated user: ${uid}`);
 
+    // Invalidate user + stats cache
+    await cache.del(keys.user(uid));
+    await cache.del(keys.userStats());
+
     const updated = await userRef.get();
     return { id: updated.id, ...updated.data() };
   } catch (error) {
@@ -295,6 +316,10 @@ const reactivateUser = async (uid, reactivatedBy) => {
     await admin.auth().updateUser(uid, { disabled: false });
 
     console.log(`✅ Reactivated user: ${uid}`);
+
+    // Invalidate user + stats cache
+    await cache.del(keys.user(uid));
+    await cache.del(keys.userStats());
 
     const updated = await userRef.get();
     return { id: updated.id, ...updated.data() };
@@ -326,37 +351,39 @@ const updateLastLogin = async (uid) => {
  * @returns {Promise<Object>}
  */
 const getUserStats = async () => {
-  try {
-    const db = getDb();
-    const usersSnapshot = await db.collection("users").get();
+  return cache.getOrSet(keys.userStats(), TTL.STATS, async () => {
+    try {
+      const db = getDb();
+      const usersSnapshot = await db.collection("users").get();
 
-    const stats = {
-      total: usersSnapshot.size,
-      byRole: {},
-      active: 0,
-      inactive: 0,
-    };
+      const stats = {
+        total: usersSnapshot.size,
+        byRole: {},
+        active: 0,
+        inactive: 0,
+      };
 
-    usersSnapshot.forEach((doc) => {
-      const data = doc.data();
-      const role = data.role || ROLES.USER;
+      usersSnapshot.forEach((doc) => {
+        const data = doc.data();
+        const role = data.role || ROLES.USER;
 
-      // Count by role
-      stats.byRole[role] = (stats.byRole[role] || 0) + 1;
+        // Count by role
+        stats.byRole[role] = (stats.byRole[role] || 0) + 1;
 
-      // Count active/inactive
-      if (data.isActive !== false) {
-        stats.active++;
-      } else {
-        stats.inactive++;
-      }
-    });
+        // Count active/inactive
+        if (data.isActive !== false) {
+          stats.active++;
+        } else {
+          stats.inactive++;
+        }
+      });
 
-    return stats;
-  } catch (error) {
-    console.error(`❌ Error getting user stats:`, error);
-    throw error;
-  }
+      return stats;
+    } catch (error) {
+      console.error(`❌ Error getting user stats:`, error);
+      throw error;
+    }
+  });
 };
 
 /**

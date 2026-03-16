@@ -105,11 +105,16 @@ const verifyToken = async (req, res, next) => {
 
     // Try to get additional user info from Firestore (role, partnerId, etc.)
     try {
+      const { cache, TTL, keys } = require('./services/cache');
       const db = admin.firestore();
-      const userDoc = await db.collection("users").doc(decodedToken.uid).get();
+      const cacheKey = keys.user(decodedToken.uid);
 
-      if (userDoc.exists) {
-        const userData = userDoc.data();
+      const userData = await cache.getOrSet(cacheKey, TTL.USER, async () => {
+        const userDoc = await db.collection("users").doc(decodedToken.uid).get();
+        return userDoc.exists ? userDoc.data() : null;
+      });
+
+      if (userData) {
         // Merge Firestore data into req.user (Firestore takes precedence)
         req.user.role = userData.role || req.user.role;
         req.user.permissions = userData.permissions || req.user.permissions;
@@ -125,6 +130,18 @@ const verifyToken = async (req, res, next) => {
             message:
               "Your account has been deactivated. Please contact support.",
             code: "ACCOUNT_DEACTIVATED",
+          });
+        }
+
+        // Check if email is verified (skip for admin/staff roles set by admin)
+        if (
+          !decodedToken.email_verified &&
+          userData.role === "user"
+        ) {
+          return res.status(403).json({
+            error: "Email not verified",
+            message: "Please verify your email address before continuing.",
+            code: "EMAIL_NOT_VERIFIED",
           });
         }
 

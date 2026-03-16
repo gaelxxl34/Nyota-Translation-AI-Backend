@@ -4,6 +4,7 @@
 
 const express = require("express");
 const admin = require("firebase-admin");
+const { cache, TTL, keys } = require("../services/cache");
 const router = express.Router();
 
 /**
@@ -20,110 +21,117 @@ router.get("/:documentId", async (req, res) => {
 
     console.log(`🔍 Verification request for document: ${documentId}`);
 
-    const db = admin.firestore();
+    const verificationData = await cache.getOrSet(keys.verification(documentId), TTL.VERIFICATION, async () => {
+      const db = admin.firestore();
 
-    // Query the bulletins collection for a document where id field matches
-    const bulletinsRef = db.collection("bulletins");
-    const snapshot = await bulletinsRef
-      .where("id", "==", documentId)
-      .limit(1)
-      .get();
+      // Query the bulletins collection for a document where id field matches
+      const bulletinsRef = db.collection("bulletins");
+      const snapshot = await bulletinsRef
+        .where("id", "==", documentId)
+        .limit(1)
+        .get();
 
-    if (snapshot.empty) {
-      console.log(`❌ No document found with ID: ${documentId}`);
-      return res.status(404).json({ error: "Document not found" });
-    }
+      if (snapshot.empty) {
+        console.log(`❌ No document found with ID: ${documentId}`);
+        return null;
+      }
 
-    const bulletinDoc = snapshot.docs[0];
-    const bulletinData = bulletinDoc.data();
+      const bulletinDoc = snapshot.docs[0];
+      const bulletinData = bulletinDoc.data();
 
-    // Extract student name from various possible locations
-    let studentName = "Unknown Student";
+      // Extract student name from various possible locations
+      let studentName = "Unknown Student";
 
-    // 1. Check editedData
-    if (bulletinData.editedData?.studentName) {
-      studentName = bulletinData.editedData.studentName;
-    }
-    // 2. Check versions subcollection
-    else {
-      try {
-        const versionsSnapshot = await bulletinDoc.ref
-          .collection("versions")
-          .limit(1)
-          .get();
+      // 1. Check editedData
+      if (bulletinData.editedData?.studentName) {
+        studentName = bulletinData.editedData.studentName;
+      }
+      // 2. Check versions subcollection
+      else {
+        try {
+          const versionsSnapshot = await bulletinDoc.ref
+            .collection("versions")
+            .limit(1)
+            .get();
 
-        if (!versionsSnapshot.empty) {
-          const versionData = versionsSnapshot.docs[0].data();
+          if (!versionsSnapshot.empty) {
+            const versionData = versionsSnapshot.docs[0].data();
 
-          if (versionData.data && Array.isArray(versionData.data)) {
-            for (const item of versionData.data) {
-              if (item.studentName) {
-                studentName = item.studentName;
-                break;
+            if (versionData.data && Array.isArray(versionData.data)) {
+              for (const item of versionData.data) {
+                if (item.studentName) {
+                  studentName = item.studentName;
+                  break;
+                }
               }
+            } else if (versionData.data?.studentName) {
+              studentName = versionData.data.studentName;
             }
-          } else if (versionData.data?.studentName) {
-            studentName = versionData.data.studentName;
+          }
+        } catch (versionsError) {
+          console.error("⚠️ Error checking versions:", versionsError.message);
+        }
+      }
+
+      // 3. Fallback fields
+      if (studentName === "Unknown Student") {
+        const fallbackFields = [
+          "studentName",
+          "student_name",
+          "name",
+          "Student Name",
+        ];
+        for (const field of fallbackFields) {
+          if (bulletinData[field]) {
+            studentName = bulletinData[field];
+            break;
           }
         }
-      } catch (versionsError) {
-        console.error("⚠️ Error checking versions:", versionsError.message);
       }
-    }
 
-    // 3. Fallback fields
-    if (studentName === "Unknown Student") {
-      const fallbackFields = [
-        "studentName",
-        "student_name",
-        "name",
-        "Student Name",
-      ];
-      for (const field of fallbackFields) {
-        if (bulletinData[field]) {
-          studentName = bulletinData[field];
-          break;
-        }
+      const result = {
+        studentName,
+        generationDate:
+          bulletinData.createdAt ||
+          bulletinData.uploadedAt ||
+          bulletinData.metadata?.createdAt ||
+          new Date().toISOString(),
+        documentTitle:
+          bulletinData.editedData?.documentTitle ||
+          bulletinData.originalData?.documentTitle ||
+          undefined,
+        documentType:
+          bulletinData.editedData?.documentType ||
+          bulletinData.originalData?.documentType ||
+          undefined,
+        sourceLanguage:
+          bulletinData.editedData?.sourceLanguage ||
+          bulletinData.originalData?.sourceLanguage ||
+          undefined,
+        targetLanguage:
+          bulletinData.editedData?.targetLanguage ||
+          bulletinData.originalData?.targetLanguage ||
+          bulletinData.metadata?.targetLanguage ||
+          undefined,
+        formType:
+          bulletinData.metadata?.formType ||
+          bulletinData.editedData?.formType ||
+          undefined,
+      };
+
+      // For general documents, use documentTitle as fallback
+      if (
+        result.studentName === "Unknown Student" &&
+        result.documentTitle
+      ) {
+        result.studentName = result.documentTitle;
       }
-    }
 
-    // Build verification response (only expose minimal data)
-    const verificationData = {
-      studentName,
-      generationDate:
-        bulletinData.createdAt ||
-        bulletinData.uploadedAt ||
-        bulletinData.metadata?.createdAt ||
-        new Date().toISOString(),
-      documentTitle:
-        bulletinData.editedData?.documentTitle ||
-        bulletinData.originalData?.documentTitle ||
-        undefined,
-      documentType:
-        bulletinData.editedData?.documentType ||
-        bulletinData.originalData?.documentType ||
-        undefined,
-      sourceLanguage:
-        bulletinData.editedData?.sourceLanguage ||
-        bulletinData.originalData?.sourceLanguage ||
-        undefined,
-      targetLanguage:
-        bulletinData.editedData?.targetLanguage ||
-        bulletinData.originalData?.targetLanguage ||
-        bulletinData.metadata?.targetLanguage ||
-        undefined,
-      formType:
-        bulletinData.metadata?.formType ||
-        bulletinData.editedData?.formType ||
-        undefined,
-    };
+      return result;
+    });
 
-    // For general documents, use documentTitle as fallback
-    if (
-      verificationData.studentName === "Unknown Student" &&
-      verificationData.documentTitle
-    ) {
-      verificationData.studentName = verificationData.documentTitle;
+    if (!verificationData) {
+      return res.status(404).json({ error: "Document not found" });
     }
 
     console.log(`✅ Verification successful for document: ${documentId}`);

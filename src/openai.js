@@ -663,19 +663,71 @@ Return data in this exact JSON format:
 }`;
   }
 
-  // General Document - PDF multi-page translation
+  // General Document - multi-language document translation & extraction
+  // Handles French, Arabic, Spanish, and auto-detected documents
   if (formType === "generalDocument") {
     const lang = options.targetLanguage || "english";
+    const sourceLanguage = options.sourceLanguage || "auto";
     const langLabel =
       lang === "french"
         ? "French"
         : lang === "swahili"
           ? "Kiswahili Safi (the Swahili variant spoken in the Democratic Republic of Congo)"
           : "English";
-    return `You are an EXPERT multilingual document translator and content extractor. You specialize in reading documents (PDFs, scanned documents, forms, surveys, research papers, consent forms, etc.) and translating them from any language to ${langLabel} while PERFECTLY preserving the document's structure.
+
+    // Build source language hint for the AI
+    const sourceHint = sourceLanguage === "auto"
+      ? "Auto-detect the source language from the document content. Report the detected language in the sourceLanguage field."
+      : `The source language is ${sourceLanguage === "fr" ? "French" : sourceLanguage === "ar" ? "Arabic" : sourceLanguage === "es" ? "Spanish" : sourceLanguage === "pt" ? "Portuguese" : sourceLanguage}. Confirm this matches the document content.`;
+
+    // Arabic-specific guidance
+    const arabicGuidelines = (sourceLanguage === "ar" || sourceLanguage === "auto") ? `
+
+📝 ARABIC DOCUMENT HANDLING (if source is Arabic):
+- Arabic text reads RIGHT-TO-LEFT (RTL) — extract content in logical reading order
+- Preserve Arabic names, institution names, and proper nouns transliterated or as-is where standard English equivalents don't exist
+- For Arabic academic terms, use standard English educational equivalents:
+  * شهادة (shahadah) → Certificate/Diploma
+  * كشف النقاط / كشف الدرجات → Transcript / Grade Report
+  * بكالوريوس → Bachelor's Degree
+  * ماجستير → Master's Degree
+  * جامعة → University
+  * كلية → Faculty/College
+  * قسم → Department
+  * المعدل العام / المعدل التراكمي → GPA / Cumulative Average
+  * ناجح → Pass, راسب → Fail, جيد → Good, جيد جداً → Very Good, ممتاز → Excellent
+- Hijri dates: preserve the original AND include Gregorian equivalent if determinable (e.g., "1445 AH / 2024 CE")
+- Detect if document uses Eastern Arabic numerals (٠١٢٣٤٥٦٧٨٩) and convert to Western Arabic numerals (0123456789) in the output
+- For grade scales, preserve the original scale info in the output` : "";
+
+    // Spanish-specific guidance
+    const spanishGuidelines = (sourceLanguage === "es" || sourceLanguage === "auto") ? `
+
+📝 SPANISH DOCUMENT HANDLING (if source is Spanish):
+- For Latin American academic terms, use standard English equivalents:
+  * Título / Diploma → Diploma / Degree
+  * Certificado de Estudios / Constancia → Certificate of Studies / Transcript
+  * Licenciatura → Bachelor's Degree (Latin America)
+  * Bachillerato → High School Diploma (Latin America) / Bachelor's (Spain)
+  * Promedio / Calificación → Average / Grade
+  * Aprobado → Pass, Reprobado → Fail, Sobresaliente → Outstanding
+  * Cédula Profesional → Professional License
+  * Acta de Examen → Exam Record
+  * Boleta de Calificaciones → Report Card / Grade Report
+- Be aware of regional variations: Mexican, Colombian, Argentine, and Spanish academic systems have different terminology
+- Preserve accented characters in proper names (José, María, González)` : "";
+
+    return `You are an EXPERT multilingual document translator and content extractor. You specialize in reading documents (PDFs, scanned documents, forms, surveys, research papers, consent forms, academic transcripts, diplomas, certificates, etc.) and translating them from any language to ${langLabel} while PERFECTLY preserving the document's structure.
+
+🌐 SOURCE LANGUAGE:
+${sourceHint}
 
 🎯 YOUR MISSION:
-Read this document, identify its structure (headings, paragraphs, lists, tables, checkboxes, form fields, etc.), translate ALL text content to ${langLabel}, and return a structured JSON representation that preserves the original layout.
+1. DETECT the source language of the document (if not specified)
+2. Read the ENTIRE document, identify its structure (headings, paragraphs, lists, tables, checkboxes, form fields, etc.)
+3. TRANSLATE ALL text content to ${langLabel}
+4. Return a structured JSON representation that preserves the original layout
+5. For academic documents: extract grade tables, student info, and institutional details with precision
 
 📋 CONTENT BLOCK TYPES YOU MUST IDENTIFY:
 - "heading": Section titles/headers (with level 1-4)
@@ -688,8 +740,17 @@ Read this document, identify its structure (headings, paragraphs, lists, tables,
 - "divider": Horizontal lines / section separators
 - "link": URLs or hyperlinks
 - "caption": Small print, footnotes, or captions
+- "image_description": Description of stamps, seals, photos, logos, or signatures visible in the document
 
-🔍 EXTRACTION RULES:
+� TEXT ALIGNMENT (CRITICAL - DETECT FROM ORIGINAL DOCUMENT):
+For EVERY heading, paragraph, caption, and blockquote block, you MUST include an "alignment" field.
+IMPORTANT: You must VISUALLY INSPECT the original document image and detect the actual alignment of each text element. Do NOT guess or assume defaults - look at how the text is positioned on the page:
+- "center" - text that is visually centered on the page
+- "left" - text aligned to the left margin
+- "right" - text aligned to the right margin
+Look at the original document layout carefully. If a title is centered in the original, set alignment to "center". If a paragraph is left-aligned, set it to "left". If a date or reference number is on the right, set it to "right". The goal is to faithfully reproduce the original document's visual layout.
+
+�🔍 EXTRACTION RULES:
 1. Process the document PAGE BY PAGE - each physical page becomes a separate page object
 2. Within each page, extract content blocks IN THE EXACT ORDER they appear
 3. TRANSLATE all text content to ${langLabel} (except proper names, URLs, email addresses)
@@ -700,6 +761,8 @@ Read this document, identify its structure (headings, paragraphs, lists, tables,
 8. Section numbers in headings should be preserved (e.g., "Section 1:", "Part A:")
 9. If text appears highlighted or in a colored background, mark it as highlighted
 10. Preserve the hierarchical structure (main headings vs sub-headings)
+11. For academic grade tables: extract EVERY row, preserve exact numbers and grades
+12. For official/formal documents: detect text alignment from the visual layout and set the "alignment" field accordingly ("center", "left", or "right")
 
 🌍 TRANSLATION GUIDELINES:
 - Translate ALL text from the source language to ${langLabel}
@@ -712,12 +775,15 @@ Read this document, identify its structure (headings, paragraphs, lists, tables,
 - For academic/legal terms, use standard ${langLabel} equivalents
 - Keep units of measurement symbols as-is (kg, cm, %, etc.)
 - Keep table cell values that are purely numeric as-is
+${arabicGuidelines}${spanishGuidelines}
 
 ⚠️ IMPORTANT:
 - If the document has multiple pages, create a separate page object for each
 - If you cannot determine the page break, use logical section breaks
 - Do NOT skip any content - extract EVERYTHING visible in the document
 - Checkbox state detection: ☑/■/● = checked, ☐/□/○ = unchecked
+- For stamps/seals: describe them in an image_description block
+- For signatures: note their presence in an image_description block
 
 🚨 ZERO CONTENT LOSS POLICY (MANDATORY):
 - You MUST include EVERY SINGLE paragraph, sentence, and line from the original document. No exceptions.
@@ -731,9 +797,18 @@ Return data in this EXACT JSON format:
 {
   "documentTitle": "string - main title of the document in ${langLabel}",
   "documentSubtitle": "string or null - subtitle if present",
-  "documentType": "string - e.g., 'Research Form', 'Consent Form', 'Survey', 'Certificate', 'Letter', 'Report', etc.",
-  "sourceLanguage": "string - detected source language (e.g., 'French', 'Spanish')",
+  "documentType": "string - e.g., 'Transcript', 'Diploma', 'Certificate', 'Report Card', 'Attestation', 'Research Form', 'Consent Form', 'Survey', 'Letter', 'Report', etc.",
+  "sourceLanguage": "string - ISO 639-1 code of detected source language (e.g., 'fr', 'ar', 'es')",
+  "sourceLanguageName": "string - full name of detected source language (e.g., 'French', 'Arabic', 'Spanish')",
   "targetLanguage": "${langLabel}",
+  "isAcademic": true,
+  "academicInfo": {
+    "studentName": "string or null",
+    "institution": "string or null - school/university name",
+    "academicYear": "string or null",
+    "grade": "string or null - class/grade level",
+    "program": "string or null - major/section/option"
+  },
   "author": "string or null - document author if visible",
   "organization": "string or null - issuing organization if visible",
   "date": "string or null - document date if visible",
@@ -741,8 +816,8 @@ Return data in this EXACT JSON format:
     {
       "pageNumber": 1,
       "blocks": [
-        { "type": "heading", "level": 1, "text": "Main Title in ${langLabel}" },
-        { "type": "paragraph", "text": "Translated paragraph text...", "italic": false, "bold": false },
+        { "type": "heading", "level": 1, "text": "Main Title in ${langLabel}", "alignment": "center" },
+        { "type": "paragraph", "text": "Translated paragraph text...", "italic": false, "bold": false, "alignment": "center" },
         { "type": "unorderedList", "items": ["First bullet point", "Second bullet point"] },
         { "type": "orderedList", "items": ["First numbered item", "Second numbered item"] },
         { "type": "checkboxList", "checkboxItems": [{"label": "Option A", "checked": true}, {"label": "Option B", "checked": false}] },
@@ -750,11 +825,18 @@ Return data in this EXACT JSON format:
         { "type": "blockquote", "text": "Emphasized or quoted text", "highlighted": true },
         { "type": "divider" },
         { "type": "link", "url": "https://example.com", "linkText": "Click here" },
-        { "type": "caption", "text": "Small print or footnote text" }
+        { "type": "caption", "text": "Small print or footnote text" },
+        { "type": "image_description", "text": "Official university seal/stamp visible" }
       ]
     }
   ]
-}`;
+}
+
+IMPORTANT NOTES ON JSON:
+- "isAcademic" should be true if this is ANY kind of academic document (transcript, diploma, report card, etc.), false otherwise
+- "academicInfo" should be populated for academic documents, null for non-academic
+- "sourceLanguage" MUST be the ISO 639-1 code (fr, ar, es, pt, etc.), NOT the full name
+- Return ONLY clean JSON with NO markdown formatting around it`;
   }
 
   // Default bulletin system prompt for form4/form6
@@ -1189,35 +1271,47 @@ Analyze this College Transcript and return the extracted data in the specified J
 Analyze this College Attestation and return the extracted data in the specified JSON format with ALL French text translated to English except proper nouns.`;
   }
 
-  // General Document - multi-page PDF translation
+  // General Document - multi-language document translation & extraction
   if (formType === "generalDocument") {
     const lang = options.targetLanguage || "english";
+    const sourceLanguage = options.sourceLanguage || "auto";
     const langLabel =
       lang === "french"
         ? "French"
         : lang === "swahili"
           ? "Kiswahili Safi (the Swahili variant spoken in the Democratic Republic of Congo)"
           : "English";
-    return `Analyze this document carefully. This could be any type of document: a research form, consent form, survey, letter, certificate, report, or any other multi-page document.
+
+    const sourceLangHint = sourceLanguage === "auto"
+      ? "The source language is unknown — auto-detect it."
+      : `Expected source language: ${sourceLanguage === "fr" ? "French" : sourceLanguage === "ar" ? "Arabic" : sourceLanguage === "es" ? "Spanish" : sourceLanguage}.`;
+
+    return `Analyze this document carefully. This could be any type of document in any language: an academic transcript, diploma, certificate, report card, research form, consent form, survey, letter, attestation, or any other document.
+
+${sourceLangHint}
 
 🎯 YOUR TASK:
-1. Read EVERY page of the document thoroughly
-2. Identify the document structure: titles, sections, paragraphs, lists, tables, checkboxes, links, etc.
-3. Translate ALL text content to ${langLabel} (keep proper names, emails, URLs, phone numbers as-is)
-4. Return a structured JSON with content organized by pages and content blocks
+1. DETECT the source language (report it as ISO 639-1 code in sourceLanguage field)
+2. Read EVERY page of the document thoroughly
+3. Identify the document structure: titles, sections, paragraphs, lists, tables, checkboxes, links, stamps, seals, etc.
+4. Translate ALL text content to ${langLabel} (keep proper names, emails, URLs, phone numbers as-is)
+5. If this is an academic document, extract student/institution info into the academicInfo object
+6. Return a structured JSON with content organized by pages and content blocks
 
 📋 STEP-BY-STEP PROCESS:
-1. First, identify the document title and metadata (author, organization, date, type)
-2. Then process each page top-to-bottom:
+1. First, identify the source language and the document title/metadata (author, organization, date, type)
+2. Determine if this is an academic document (set isAcademic accordingly)
+3. Then process each page top-to-bottom:
    - Identify headings and their hierarchy (H1, H2, H3, H4)
    - Extract paragraphs preserving their order
    - Identify numbered lists (1., 2., 3. or a., b., c.)
    - Identify bullet point lists
    - Detect checkboxes and their checked/unchecked state
-   - Extract tables with headers and rows
+   - Extract tables with headers and rows — preserve ALL numeric values exactly
    - Note any highlighted/emphasized text
    - Capture links and their text
    - Note section dividers/horizontal rules
+   - Describe any stamps, seals, photos, or signatures visible
 
 ⚠️ CRITICAL RULES:
 - Do NOT skip any content - EVERY paragraph, EVERY line, EVERY sentence must be included
@@ -1229,6 +1323,8 @@ Analyze this College Attestation and return the extracted data in the specified 
 - If the document has form fields with blanks (___), preserve them as "(blank)" in the text
 - For multiple-choice questions, use checkboxList type
 - Include footnotes, disclaimers, fine print, page headers - absolutely nothing should be left out
+- For Arabic documents: read RTL, convert Eastern Arabic numerals to Western, handle Hijri dates
+- For grade tables: extract EVERY row and column exactly — do not skip any subjects or scores
 - Return ONLY clean JSON with NO markdown formatting around it`;
   }
 
@@ -2086,10 +2182,80 @@ const sortSubjectsByMaxima = (subjects) => {
     });
 };
 
+/**
+ * Quick language detection — lightweight pre-check before full extraction
+ * Uses GPT-4o with low token count to detect language + document type
+ * @param {string} filePath - Path to the uploaded file
+ * @returns {Promise<Object>} Detected language info and document type
+ */
+const detectDocumentLanguage = async (filePath) => {
+  try {
+    const fileData = prepareFileForProcessing(filePath);
+    const openai = initializeOpenAI();
+
+    const userContent = [
+      {
+        type: "text",
+        text: `Quickly analyze this document and return ONLY a JSON object with:
+{
+  "sourceLanguage": "ISO 639-1 code (fr, ar, es, pt, en, zh, sw, etc.)",
+  "sourceLanguageName": "Full language name (French, Arabic, Spanish, etc.)",
+  "documentType": "Brief type (Transcript, Diploma, Certificate, Report Card, Letter, etc.)",
+  "isAcademic": true/false,
+  "confidence": "high/medium/low",
+  "isRTL": true/false
+}
+Return ONLY the JSON, no explanation.`,
+      },
+    ];
+
+    const isPDF = fileData.fileExtension === ".pdf";
+    if (isPDF) {
+      userContent.push({
+        type: "file",
+        file: {
+          filename: fileData.filename,
+          file_data: `data:${fileData.mimeType};base64,${fileData.base64File}`,
+        },
+      });
+    } else {
+      userContent.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${fileData.mimeType};base64,${fileData.base64File}`,
+          detail: "low", // Low detail for speed — just need language detection
+        },
+      });
+    }
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: userContent }],
+      max_tokens: 200,
+      temperature: 0.0,
+    });
+
+    const result = parseOpenAIResponse(response.choices[0]?.message?.content);
+    console.log(`🌐 Language detected: ${result.sourceLanguageName} (${result.sourceLanguage}), Type: ${result.documentType}`);
+    return result;
+  } catch (error) {
+    console.error("⚠️ Language detection failed, defaulting to auto:", error.message);
+    return {
+      sourceLanguage: "unknown",
+      sourceLanguageName: "Unknown",
+      documentType: "Document",
+      isAcademic: false,
+      confidence: "low",
+      isRTL: false,
+    };
+  }
+};
+
 module.exports = {
   initializeOpenAI,
   uploadAndExtractWithOpenAI,
   uploadAndExtract: uploadAndExtractWithOpenAI, // Backward compatibility alias
+  detectDocumentLanguage,
   validateExtractedData,
   sortSubjectsByMaxima,
   // Exporting individual functions for better testability

@@ -5,6 +5,7 @@ const express = require("express");
 const { verifyToken } = require("../auth");
 const { ROLES, requireRole, attachRoleInfo } = require("../middleware/rbac");
 const admin = require("firebase-admin");
+const { cache, TTL, keys } = require("../services/cache");
 
 const router = express.Router();
 const db = admin.firestore();
@@ -44,36 +45,39 @@ router.get(
         });
       }
 
-      const partnerDoc = await db.collection("partners").doc(partnerId).get();
+      const partnerData = await cache.getOrSet(keys.partner(partnerId), TTL.PARTNER, async () => {
+        const partnerDoc = await db.collection("partners").doc(partnerId).get();
+        if (!partnerDoc.exists) return null;
+        const data = partnerDoc.data();
+        return {
+          id: partnerDoc.id,
+          partnerId: data.partnerId,
+          name: data.name,
+          shortCode: data.shortCode,
+          type: data.type,
+          email: data.email,
+          phone: data.phone,
+          address: data.address,
+          logo: data.logo,
+          primaryColor: data.primaryColor,
+          stats: data.stats,
+          pricing: data.pricing,
+          commissionEnabled: data.commissionEnabled,
+          commissionTiers: data.commissionTiers,
+          isActive: data.isActive,
+          createdAt: data.createdAt?.toDate?.() || data.createdAt,
+        };
+      });
 
-      if (!partnerDoc.exists) {
+      if (!partnerData) {
         return res.status(404).json({
           error: "Partner organization not found",
         });
       }
 
-      const partnerData = partnerDoc.data();
-
       res.json({
         success: true,
-        partner: {
-          id: partnerDoc.id,
-          partnerId: partnerData.partnerId,
-          name: partnerData.name,
-          shortCode: partnerData.shortCode,
-          type: partnerData.type,
-          email: partnerData.email,
-          phone: partnerData.phone,
-          address: partnerData.address,
-          logo: partnerData.logo,
-          primaryColor: partnerData.primaryColor,
-          stats: partnerData.stats,
-          pricing: partnerData.pricing,
-          commissionEnabled: partnerData.commissionEnabled,
-          commissionTiers: partnerData.commissionTiers,
-          isActive: partnerData.isActive,
-          createdAt: partnerData.createdAt?.toDate?.() || partnerData.createdAt,
-        },
+        partner: partnerData,
       });
     } catch (error) {
       console.error("❌ Error fetching partner profile:", error);
@@ -286,101 +290,94 @@ router.get(
         });
       }
 
-      // Calculate date range
-      const now = new Date();
-      let startDate;
+      const statsCacheKey = keys.partnerDocs(partnerId || "all", `stats:${period}`);
+      const stats = await cache.getOrSet(statsCacheKey, TTL.STATS, async () => {
+        // Calculate date range
+        const now = new Date();
+        let startDate;
 
-      switch (period) {
-        case "week":
-          startDate = new Date(now.setDate(now.getDate() - 7));
-          break;
-        case "month":
-          startDate = new Date(now.setMonth(now.getMonth() - 1));
-          break;
-        case "quarter":
-          startDate = new Date(now.setMonth(now.getMonth() - 3));
-          break;
-        case "year":
-          startDate = new Date(now.setFullYear(now.getFullYear() - 1));
-          break;
-        default:
-          startDate = null;
-      }
-
-      // Build query
-      let baseQuery = db.collection("documents");
-      if (partnerId) {
-        baseQuery = baseQuery.where("partnerId", "==", partnerId);
-      }
-
-      // Get all documents for partner
-      const allDocsSnap = await baseQuery.get();
-
-      // Get documents in period
-      let periodQuery = baseQuery;
-      if (startDate) {
-        periodQuery = periodQuery.where("createdAt", ">=", startDate);
-      }
-      const periodDocsSnap = await periodQuery.get();
-
-      // Calculate stats
-      const stats = {
-        totalDocuments: allDocsSnap.size,
-        documentsInPeriod: periodDocsSnap.size,
-        byStatus: {},
-        byFormType: {},
-        byMonth: [],
-      };
-
-      // Count by status and form type
-      allDocsSnap.forEach((doc) => {
-        const data = doc.data();
-
-        // By status
-        stats.byStatus[data.status] = (stats.byStatus[data.status] || 0) + 1;
-
-        // By form type
-        stats.byFormType[data.formType] =
-          (stats.byFormType[data.formType] || 0) + 1;
-      });
-
-      // Monthly breakdown (last 6 months)
-      const monthlyStats = {};
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-      allDocsSnap.forEach((doc) => {
-        const data = doc.data();
-        const createdAt =
-          data.createdAt?.toDate?.() || new Date(data.createdAt);
-
-        if (createdAt >= sixMonthsAgo) {
-          const monthKey = `${createdAt.getFullYear()}-${String(
-            createdAt.getMonth() + 1
-          ).padStart(2, "0")}`;
-          monthlyStats[monthKey] = (monthlyStats[monthKey] || 0) + 1;
+        switch (period) {
+          case "week":
+            startDate = new Date(now.setDate(now.getDate() - 7));
+            break;
+          case "month":
+            startDate = new Date(now.setMonth(now.getMonth() - 1));
+            break;
+          case "quarter":
+            startDate = new Date(now.setMonth(now.getMonth() - 3));
+            break;
+          case "year":
+            startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+            break;
+          default:
+            startDate = null;
         }
+
+        // Build query
+        let baseQuery = db.collection("documents");
+        if (partnerId) {
+          baseQuery = baseQuery.where("partnerId", "==", partnerId);
+        }
+
+        // Get all documents for partner
+        const allDocsSnap = await baseQuery.get();
+
+        // Get documents in period
+        let periodQuery = baseQuery;
+        if (startDate) {
+          periodQuery = periodQuery.where("createdAt", ">=", startDate);
+        }
+        const periodDocsSnap = await periodQuery.get();
+
+        // Calculate stats
+        const result = {
+          totalDocuments: allDocsSnap.size,
+          documentsInPeriod: periodDocsSnap.size,
+          byStatus: {},
+          byFormType: {},
+          byMonth: [],
+        };
+
+        // Count by status and form type
+        allDocsSnap.forEach((doc) => {
+          const data = doc.data();
+          result.byStatus[data.status] = (result.byStatus[data.status] || 0) + 1;
+          result.byFormType[data.formType] = (result.byFormType[data.formType] || 0) + 1;
+        });
+
+        // Monthly breakdown (last 6 months)
+        const monthlyStats = {};
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        allDocsSnap.forEach((doc) => {
+          const data = doc.data();
+          const createdAt = data.createdAt?.toDate?.() || new Date(data.createdAt);
+          if (createdAt >= sixMonthsAgo) {
+            const monthKey = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
+            monthlyStats[monthKey] = (monthlyStats[monthKey] || 0) + 1;
+          }
+        });
+
+        result.byMonth = Object.entries(monthlyStats)
+          .map(([month, count]) => ({ month, count }))
+          .sort((a, b) => a.month.localeCompare(b.month));
+
+        // Get unique students count
+        const uniqueStudents = new Set();
+        allDocsSnap.forEach((doc) => {
+          const data = doc.data();
+          if (data.userId) uniqueStudents.add(data.userId);
+        });
+        result.uniqueStudents = uniqueStudents.size;
+        result.approvedDocuments = result.byStatus["approved"] || 0;
+        result.pendingDocuments =
+          (result.byStatus["pending_review"] || 0) +
+          (result.byStatus["in_review"] || 0) +
+          (result.byStatus["ai_completed"] || 0);
+
+        return result;
       });
-
-      // Convert to array and sort
-      stats.byMonth = Object.entries(monthlyStats)
-        .map(([month, count]) => ({ month, count }))
-        .sort((a, b) => a.month.localeCompare(b.month));
-
-      // Get unique students count
-      const uniqueStudents = new Set();
-      allDocsSnap.forEach((doc) => {
-        const data = doc.data();
-        if (data.userId) uniqueStudents.add(data.userId);
-      });
-      stats.uniqueStudents = uniqueStudents.size;
-
-      // Approved documents
-      stats.approvedDocuments = stats.byStatus["approved"] || 0;
-      stats.pendingDocuments =
-        (stats.byStatus["pending_review"] || 0) +
-        (stats.byStatus["in_review"] || 0) +
-        (stats.byStatus["ai_completed"] || 0);
 
       res.json({
         success: true,
@@ -787,6 +784,10 @@ router.put(
 
       await db.collection("partners").doc(partnerId).update(updateData);
 
+      // Invalidate partner cache
+      await cache.del(keys.partner(partnerId));
+      await cache.del(keys.allPartners());
+
       res.json({
         success: true,
         message: "Branding updated successfully",
@@ -886,6 +887,63 @@ router.get(
       console.error("❌ Error fetching students:", error);
       res.status(500).json({
         error: "Failed to fetch students",
+        message: error.message,
+      });
+    }
+  }
+);
+
+// ============================================
+// PARTNER PROMO CODE ROUTES
+// ============================================
+
+/**
+ * GET /api/partner/promo-codes
+ * Get promo codes for the current partner
+ * Requires: Partner or Super Admin role
+ */
+router.get(
+  "/promo-codes",
+  verifyToken,
+  requireRole([ROLES.PARTNER, ROLES.SUPER_ADMIN]),
+  async (req, res) => {
+    try {
+      const partnerId = req.user.partnerId;
+
+      if (!partnerId) {
+        return res.status(400).json({
+          error: "No partner organization associated with this account",
+        });
+      }
+
+      const snapshot = await db
+        .collection("promoCodes")
+        .where("partnerId", "==", partnerId)
+        .orderBy("createdAt", "desc")
+        .get();
+
+      const promoCodes = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        promoCodes.push({
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
+          validFrom: data.validFrom?.toDate?.()?.toISOString() || data.validFrom,
+          validUntil: data.validUntil?.toDate?.()?.toISOString() || data.validUntil,
+        });
+      });
+
+      res.json({
+        success: true,
+        promoCodes,
+        count: promoCodes.length,
+      });
+    } catch (error) {
+      console.error("❌ Error fetching partner promo codes:", error);
+      res.status(500).json({
+        error: "Failed to fetch promo codes",
         message: error.message,
       });
     }

@@ -3,12 +3,186 @@
 
 const express = require("express");
 const admin = require("firebase-admin");
+const { cache, TTL, keys } = require("../services/cache");
 const router = express.Router();
 
 // Initialize Firebase Admin if not already initialized
 const { initializeFirebaseAdmin } = require("../auth");
+const { deleteFromStorage } = require("../services/storage");
 
-// DELETE /api/bulletins/:id - Delete a bulletin from Firestore
+// GET /api/bulletins/my - List current user's bulletins (drafts/processed docs)
+router.get("/bulletins/my", async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    initializeFirebaseAdmin();
+    const db = admin.firestore();
+
+    const snapshot = await cache.getOrSet(
+      keys.userBulletins(userId),
+      TTL.LIST,
+      async () => {
+        const snap = await db
+          .collection("bulletins")
+          .where("userId", "==", userId)
+          .where("isActive", "==", true)
+          .orderBy("metadata.createdAt", "desc")
+          .limit(50)
+          .get();
+
+        return snap.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            formType: data.metadata?.formType || data.formType || "generalDocument",
+            sourceLanguage: data.sourceLanguage || data.metadata?.sourceLanguage || data.originalData?.sourceLanguage || "auto",
+            studentName:
+              data.originalData?.academicInfo?.studentName ||
+              data.originalData?.studentName ||
+              data.metadata?.studentName ||
+              "Untitled Document",
+            documentTitle:
+              data.originalData?.documentTitle || data.originalData?.documentType || null,
+            status: data.metadata?.status || "processed",
+            createdAt: data.metadata?.createdAt || null,
+            hasStorageFile: !!data.metadata?.storagePath,
+          };
+        });
+      }
+    );
+
+    res.json({ success: true, bulletins: snapshot });
+  } catch (error) {
+    console.error("❌ Failed to list bulletins:", error.message);
+    res.status(500).json({ error: "Failed to load documents", details: error.message });
+  }
+});
+
+// GET /api/bulletins/:id - Get a single bulletin's data (for resuming drafts)
+router.get("/bulletins/:id", async (req, res) => {
+  try {
+    const { id: bulletinId } = req.params;
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    initializeFirebaseAdmin();
+    const db = admin.firestore();
+
+    const bulletinData = await cache.getOrSet(
+      keys.bulletin(bulletinId),
+      TTL.DOCUMENT,
+      async () => {
+        const bulletinDoc = await db.collection("bulletins").doc(bulletinId).get();
+        return bulletinDoc.exists ? { ...bulletinDoc.data(), _docId: bulletinDoc.id } : null;
+      }
+    );
+
+    if (!bulletinData) {
+      return res.status(404).json({ error: "Bulletin not found" });
+    }
+
+    if (bulletinData.userId !== userId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const data = bulletinData.editedData || bulletinData.originalData;
+    const formType = bulletinData.metadata?.formType || bulletinData.formType || "generalDocument";
+    const sourceLanguage = bulletinData.sourceLanguage || data?.sourceLanguage || bulletinData.metadata?.sourceLanguage || bulletinData.originalData?.sourceLanguage || "auto";
+
+    res.json({
+      success: true,
+      bulletin: {
+        id: bulletinId,
+        formType,
+        sourceLanguage,
+        data,
+        storageUrl: bulletinData.metadata?.storageUrl || null,
+        storagePath: bulletinData.metadata?.storagePath || null,
+        fileName: bulletinData.metadata?.fileName || null,
+        fileSize: bulletinData.metadata?.fileSize || null,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Failed to get bulletin:", error.message);
+    res.status(500).json({ error: "Failed to load bulletin", details: error.message });
+  }
+});
+
+// GET /api/bulletins/:id/delete-info - Pre-delete check: what will be removed
+router.get("/bulletins/:id/delete-info", async (req, res) => {
+  try {
+    const { id: bulletinId } = req.params;
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: "User not authenticated" });
+
+    initializeFirebaseAdmin();
+    const db = admin.firestore();
+
+    const bulletinDoc = await db.collection("bulletins").doc(bulletinId).get();
+    if (!bulletinDoc.exists) return res.status(404).json({ error: "Bulletin not found" });
+    if (bulletinDoc.data().userId !== userId) return res.status(403).json({ error: "Access denied" });
+
+    // Find linked certifiedDocuments
+    const certSnap = await db
+      .collection("certifiedDocuments")
+      .where("bulletinId", "==", bulletinId)
+      .where("userId", "==", userId)
+      .get();
+
+    const linkedSubmissions = certSnap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        status: data.status,
+        formType: data.formType,
+        certificationId: data.certification?.certificationId || null,
+        createdAt: data.createdAt,
+      };
+    });
+
+    // Count versions
+    const versionsSnap = await db
+      .collection("bulletins")
+      .doc(bulletinId)
+      .collection("versions")
+      .get();
+
+    // Count payments and invoices linked to certifiedDocuments
+    let paymentsCount = 0;
+    let invoicesCount = 0;
+    for (const certDoc of certSnap.docs) {
+      const paymentsSnap = await db.collection("payments")
+        .where("certDocId", "==", certDoc.id)
+        .get();
+      paymentsCount += paymentsSnap.size;
+      const invoicesSnap = await db.collection("invoices")
+        .where("certDocId", "==", certDoc.id)
+        .get();
+      invoicesCount += invoicesSnap.size;
+    }
+
+    res.json({
+      success: true,
+      bulletinId,
+      hasStorageFile: !!bulletinDoc.data().metadata?.storagePath,
+      versionsCount: versionsSnap.size,
+      linkedSubmissions,
+      paymentsCount,
+      invoicesCount,
+    });
+  } catch (error) {
+    console.error("❌ Delete info check failed:", error.message);
+    res.status(500).json({ error: "Failed to check delete info" });
+  }
+});
+
+// DELETE /api/bulletins/:id - Delete a bulletin and ALL related data from Firestore
 router.delete("/bulletins/:id", async (req, res) => {
   try {
     console.log("🗑️ Starting bulletin deletion process...");
@@ -61,11 +235,93 @@ router.delete("/bulletins/:id", async (req, res) => {
       });
     }
 
-    // Delete the main bulletin document
+    // 1. Delete bulletin's uploaded file from Firebase Storage
+    if (bulletinData.metadata?.storagePath) {
+      try {
+        await deleteFromStorage(bulletinData.metadata.storagePath);
+        console.log("✅ Storage file deleted:", bulletinData.metadata.storagePath);
+      } catch (storageErr) {
+        console.warn("⚠️ Could not delete Storage file:", storageErr.message);
+      }
+    }
+
+    // 2. Find and delete ALL linked certifiedDocuments + their storage files
+    let deletedSubmissions = 0;
+    try {
+      const certSnap = await db
+        .collection("certifiedDocuments")
+        .where("bulletinId", "==", bulletinId)
+        .where("userId", "==", userId)
+        .get();
+
+      if (!certSnap.empty) {
+        for (const certDoc of certSnap.docs) {
+          const certData = certDoc.data();
+
+          // Delete certified PDF from Cloud Storage
+          if (certData.certification?.pdfStoragePath) {
+            try {
+              await deleteFromStorage(certData.certification.pdfStoragePath);
+              console.log("✅ Certified PDF deleted:", certData.certification.pdfStoragePath);
+            } catch (err) {
+              console.warn("⚠️ Could not delete certified PDF:", err.message);
+            }
+          }
+
+          // Delete the original upload stored for the certified doc
+          if (certData.metadata?.storagePath) {
+            try {
+              await deleteFromStorage(certData.metadata.storagePath);
+              console.log("✅ Cert doc upload deleted:", certData.metadata.storagePath);
+            } catch (err) {
+              console.warn("⚠️ Could not delete cert doc upload:", err.message);
+            }
+          }
+
+          // Delete the certifiedDocument record
+          await certDoc.ref.delete();
+          deletedSubmissions++;
+
+          // Delete related payments and invoices
+          try {
+            const paymentsSnap = await db.collection("payments")
+              .where("certDocId", "==", certDoc.id)
+              .get();
+            for (const payDoc of paymentsSnap.docs) {
+              await payDoc.ref.delete();
+            }
+            const invoicesSnap = await db.collection("invoices")
+              .where("certDocId", "==", certDoc.id)
+              .get();
+            for (const invDoc of invoicesSnap.docs) {
+              await invDoc.ref.delete();
+            }
+          } catch (payErr) {
+            console.warn("⚠️ Could not delete related payments/invoices:", payErr.message);
+          }
+
+          // Invalidate cache for this cert doc
+          await cache.del(keys.certDoc(certDoc.id));
+        }
+        console.log(`✅ Deleted ${deletedSubmissions} linked certified documents`);
+
+        // Invalidate user cert docs cache
+        await cache.del(keys.userCertDocs(userId));
+      }
+    } catch (certError) {
+      console.warn("⚠️ Could not delete linked certifiedDocuments:", certError.message);
+    }
+
+    // 3. Delete the main bulletin document
     await db.collection("bulletins").doc(bulletinId).delete();
     console.log("✅ Main bulletin document deleted");
 
-    // Also delete any associated versions subcollection
+    // 4. Invalidate bulletin caches
+    await cache.del(keys.bulletin(bulletinId));
+    await cache.del(keys.userBulletins(userId));
+
+    // 5. Delete versions subcollection
+    let deletedVersions = 0;
     try {
       const versionsSnapshot = await db
         .collection("bulletins")
@@ -79,22 +335,24 @@ router.delete("/bulletins/:id", async (req, res) => {
           batch.delete(versionDoc.ref);
         });
         await batch.commit();
-        console.log(`✅ Deleted ${versionsSnapshot.size} version documents`);
+        deletedVersions = versionsSnapshot.size;
+        console.log(`✅ Deleted ${deletedVersions} version documents`);
       }
     } catch (versionError) {
       console.warn(
         "⚠️ Could not delete versions subcollection:",
         versionError.message
       );
-      // Don't fail the main deletion for this
     }
 
-    console.log("✅ Bulletin deletion completed successfully");
+    console.log("✅ Bulletin deletion completed successfully (cascade)");
 
     res.json({
       success: true,
-      message: "Bulletin deleted successfully",
+      message: "Bulletin and all related data deleted successfully",
       deletedId: bulletinId,
+      deletedSubmissions,
+      deletedVersions,
     });
   } catch (error) {
     console.error("❌ Bulletin deletion failed:", error);

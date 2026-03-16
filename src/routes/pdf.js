@@ -5,6 +5,7 @@
 const express = require("express");
 const puppeteer = require("puppeteer");
 const admin = require("firebase-admin");
+const QRCode = require("qrcode");
 const config = require("../config/env");
 const router = express.Router();
 
@@ -19,29 +20,31 @@ router.post("/export-pdf", async (req, res) => {
     console.log("🔄 Starting FIRESTORE-FIRST PDF generation...");
     console.log("📊 Received request body:", JSON.stringify(req.body, null, 2));
 
-    // Extract data from request body - FIRESTORE ID IS REQUIRED
+    // Extract data from request body - either firestoreId (bulletins) or certDocId (certifiedDocuments) is required
     const {
-      firestoreId, // REQUIRED: Firestore document ID - no longer optional
-      frontendUrl = config.frontend.urlAlt, // Use port 5174 as default since that's where frontend is running
+      firestoreId, // Firestore bulletin document ID
+      certDocId, // Certified document ID (from certifiedDocuments collection)
+      frontendUrl = config.frontend.url, // Use Vite default port 5173
       waitSelector = "#bulletin-template",
       waitForImages = false, // NEW: Wait for images including QR codes
+      watermark = false, // When true, render "AI DRAFT" watermark on generalDocument pages
       pdfOptions = {},
     } = req.body;
 
-    console.log("🔥 Firestore ID received:", firestoreId);
+    console.log("🔥 Firestore ID received:", firestoreId, "| Cert Doc ID:", certDocId);
 
-    // FIRESTORE-FIRST: Always fetch data from Firestore
-    if (!firestoreId) {
+    // Require at least one document identifier
+    if (!firestoreId && !certDocId) {
       console.error(
-        "❌ No Firestore ID provided - PDF generation requires Firestore document ID",
+        "❌ No document ID provided - PDF generation requires a Firestore document ID",
       );
       return res.status(400).json({
         error:
-          "Missing Firestore document ID. PDF generation now requires data to be stored in Firestore.",
+          "Missing document ID. Provide either firestoreId or certDocId.",
         debug: {
           requestBody: req.body,
           hasFirestoreId: !!firestoreId,
-          firestoreIdValue: firestoreId,
+          hasCertDocId: !!certDocId,
         },
       });
     }
@@ -50,63 +53,103 @@ router.post("/export-pdf", async (req, res) => {
     let finalStudentData = null;
     let formType = "form6"; // Default form type
     let tableSize = "auto"; // Default table size
+    // documentId used for QR codes — prefer bulletinId for certified docs
+    let resolvedDocumentId = firestoreId || certDocId;
 
     try {
       initializeFirebaseAdmin();
       const db = admin.firestore();
-      const bulletinDoc = await db
-        .collection("bulletins")
-        .doc(firestoreId)
-        .get();
+      const { cache, TTL, keys } = require('../services/cache');
 
-      if (!bulletinDoc.exists) {
-        console.error("❌ Firestore document not found:", firestoreId);
-        return res.status(404).json({
-          error: "Bulletin not found in Firestore",
-          debug: {
-            firestoreId: firestoreId,
-            collection: "bulletins",
-            docExists: bulletinDoc.exists,
-          },
+      if (certDocId) {
+        // ── Certified document path ──
+        const cacheKey = keys.certDoc(certDocId);
+        const certData = await cache.getOrSet(cacheKey, TTL.DOCUMENT, async () => {
+          const certDoc = await db
+            .collection("certifiedDocuments")
+            .doc(certDocId)
+            .get();
+          return certDoc.exists ? certDoc.data() : null;
+        });
+
+        if (!certData) {
+          console.error("❌ Certified document not found:", certDocId);
+          return res.status(404).json({
+            error: "Certified document not found in Firestore",
+            debug: { certDocId, collection: "certifiedDocuments" },
+          });
+        }
+        // Use certifiedData (frozen at approval), then editedData, then originalData
+        finalStudentData = certData.certifiedData || certData.editedData || certData.originalData;
+        formType = certData.formType || finalStudentData?.formType || "form6";
+        tableSize = finalStudentData?.tableSize || "auto";
+        resolvedDocumentId = certData.bulletinId || certDocId;
+
+        if (finalStudentData) {
+          finalStudentData.formType = formType;
+        }
+
+        console.log("✅ Retrieved certified document data from Firestore");
+        console.log("📊 Data structure:", {
+          hasCertifiedData: !!certData.certifiedData,
+          hasEditedData: !!certData.editedData,
+          hasOriginalData: !!certData.originalData,
+          formType,
+          tableSize,
+          dataKeys: finalStudentData ? Object.keys(finalStudentData) : [],
+        });
+      } else {
+        // ── Bulletin (draft) path ──
+        const cacheKey = keys.bulletin(firestoreId);
+        const bulletinData = await cache.getOrSet(cacheKey, TTL.DOCUMENT, async () => {
+          const bulletinDoc = await db
+            .collection("bulletins")
+            .doc(firestoreId)
+            .get();
+          return bulletinDoc.exists ? bulletinDoc.data() : null;
+        });
+
+        if (!bulletinData) {
+          console.error("❌ Firestore document not found:", firestoreId);
+          return res.status(404).json({
+            error: "Bulletin not found in Firestore",
+            debug: {
+              firestoreId: firestoreId,
+              collection: "bulletins",
+            },
+          });
+        }
+        // Use editedData if available (latest changes), otherwise fall back to originalData
+        finalStudentData = bulletinData.editedData || bulletinData.originalData;
+        formType =
+          bulletinData.formType || bulletinData.metadata?.formType || "form6";
+        tableSize = finalStudentData?.tableSize || "auto";
+
+        if (finalStudentData) {
+          finalStudentData.formType = formType;
+        }
+
+        console.log(
+          "✅ Retrieved latest data from Firestore:",
+          JSON.stringify(finalStudentData, null, 2),
+        );
+        console.log("📊 Data structure:", {
+          hasEditedData: !!bulletinData.editedData,
+          hasOriginalData: !!bulletinData.originalData,
+          usingEditedData: !!bulletinData.editedData,
+          studentName: finalStudentData?.studentName,
+          formType: formType,
+          tableSize: tableSize,
+          dataKeys: finalStudentData ? Object.keys(finalStudentData) : [],
         });
       }
-
-      const bulletinData = bulletinDoc.data();
-      // Use editedData if available (latest changes), otherwise fall back to originalData
-      finalStudentData = bulletinData.editedData || bulletinData.originalData;
-
-      // Extract form type from Firestore metadata (with backward compatibility)
-      formType =
-        bulletinData.formType || bulletinData.metadata?.formType || "form6";
-
-      // Extract tableSize from Firestore data (default to 'auto' if not set)
-      tableSize = finalStudentData?.tableSize || "auto";
-
-      // Include form type in the student data for template selection
-      if (finalStudentData) {
-        finalStudentData.formType = formType;
-      }
-
-      console.log(
-        "✅ Retrieved latest data from Firestore:",
-        JSON.stringify(finalStudentData, null, 2),
-      );
-      console.log("📊 Data structure:", {
-        hasEditedData: !!bulletinData.editedData,
-        hasOriginalData: !!bulletinData.originalData,
-        usingEditedData: !!bulletinData.editedData,
-        studentName: finalStudentData?.studentName,
-        formType: formType,
-        tableSize: tableSize,
-        dataKeys: finalStudentData ? Object.keys(finalStudentData) : [],
-      });
     } catch (firestoreError) {
       console.error(
         "❌ Failed to retrieve from Firestore:",
         firestoreError.message,
       );
       return res.status(500).json({
-        error: "Failed to retrieve bulletin data from Firestore",
+        error: "Failed to retrieve document data from Firestore",
         details: firestoreError.message,
       });
     }
@@ -116,12 +159,7 @@ router.post("/export-pdf", async (req, res) => {
       return res.status(400).json({
         error: "No student data found in Firestore document",
         debug: {
-          firestoreId: firestoreId,
-          hasEditedData: !!bulletinData.editedData,
-          hasOriginalData: !!bulletinData.originalData,
-          dataStructure: {
-            keys: bulletinData ? Object.keys(bulletinData) : [],
-          },
+          firestoreId: firestoreId || certDocId,
         },
       });
     }
@@ -136,7 +174,6 @@ router.post("/export-pdf", async (req, res) => {
         "--disable-gpu",
         "--no-first-run",
         "--no-zygote",
-        "--single-process",
         "--disable-web-security",
         "--disable-features=VizDisplayCompositor",
       ],
@@ -144,33 +181,63 @@ router.post("/export-pdf", async (req, res) => {
 
     const page = await browser.newPage();
 
-    // Set viewport for consistent rendering
+    // Log browser console and errors for debugging
+    page.on('console', msg => console.log('🌐 Browser console:', msg.type(), msg.text()));
+    page.on('pageerror', err => console.error('🌐 Browser page error:', err.message));
+    page.on('requestfailed', req => console.error('🌐 Request failed:', req.url(), req.failure()?.errorText));
+
+    // Determine if this template needs landscape orientation
+    const LANDSCAPE_FORM_TYPES = [
+      'stateDiploma',
+      'bachelorDiploma',
+      'collegeAttestation',
+      'highSchoolAttestation',
+      'stateExamAttestation',
+    ];
+    const needsLandscape = LANDSCAPE_FORM_TYPES.includes(formType);
+
+    // Set viewport for consistent rendering (wider for landscape templates)
     await page.setViewport({
-      width: 1200,
-      height: 1600,
+      width: needsLandscape ? 1200 : 1200,
+      height: needsLandscape ? 850 : 1600,
       deviceScaleFactor: 2,
     });
 
     // Navigate to the card-only page with table size parameter
     const cardUrl = `${frontendUrl}/card-only?tableSize=${encodeURIComponent(
       tableSize,
-    )}`;
+    )}${watermark ? '&watermark=1' : ''}`;
     console.log("🌐 Navigating to:", cardUrl);
 
     await page.goto(cardUrl, {
-      waitUntil: "networkidle2",
+      waitUntil: "domcontentloaded",
       timeout: 30000,
     });
 
-    // Wait for React to load by checking for the root element
+    // Wait for React to load — Vite dev server uses HMR websocket which
+    // keeps connections alive, making networkidle2 unreliable.
+    // Poll for React root to have content instead.
     console.log("⏳ Waiting for React app to load...");
-    await page.waitForFunction(
-      () => {
-        const root = document.querySelector("#root");
-        return root && root.children.length > 0;
-      },
-      { timeout: 15000 },
-    );
+    try {
+      await page.waitForFunction(
+        () => {
+          const root = document.querySelector("#root");
+          return root && root.children.length > 0;
+        },
+        { timeout: 20000, polling: 500 },
+      );
+    } catch {
+      // If React didn't mount, try reloading once
+      console.log("⚠️ React not mounted, retrying page load...");
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForFunction(
+        () => {
+          const root = document.querySelector("#root");
+          return root && root.children.length > 0;
+        },
+        { timeout: 20000, polling: 500 },
+      );
+    }
 
     // Always inject data for PDF generation to ensure reliability
     console.log(
@@ -181,9 +248,7 @@ router.post("/export-pdf", async (req, res) => {
       JSON.stringify(finalStudentData, null, 2),
     );
     console.log(
-      `🎯 PDF Generation: Using formType: ${
-        finalStudentData.formType || "form6"
-      } for template selection`,
+      `🎯 PDF Generation: Using formType: ${formType} for template selection`,
     );
 
     // Normalize the student data - handle different structures
@@ -231,10 +296,54 @@ router.post("/export-pdf", async (req, res) => {
       normalizedData = finalStudentData.data;
     }
 
+    // Ensure the resolved formType is always on the normalized data
+    // (normalization may have replaced finalStudentData with a sub-object that lacks it)
+    normalizedData.formType = formType;
+
     // ADD FIRESTORE DOCUMENT ID FOR QR CODE GENERATION
-    normalizedData.documentId = firestoreId;
-    normalizedData.firestoreId = firestoreId;
-    normalizedData.id = firestoreId;
+    normalizedData.documentId = resolvedDocumentId;
+    normalizedData.firestoreId = resolvedDocumentId;
+    normalizedData.id = resolvedDocumentId;
+
+    // Pre-generate QR code data URL so the frontend doesn't need to fetch from backend
+    // (avoids circular HTTP dependency: backend → Puppeteer → frontend → backend)
+    try {
+      const baseUrl = process.env.FRONTEND_URL || "https://nyotatranslate.com";
+      const isCertId = /^NTC-\d{4}-[A-Z2-9]{6}$/.test(resolvedDocumentId);
+      const verificationUrl = isCertId
+        ? `${baseUrl}/verify?cert=${resolvedDocumentId}`
+        : `${baseUrl}/verify?doc=${resolvedDocumentId}`;
+      normalizedData.qrDataUrl = await QRCode.toDataURL(verificationUrl, {
+        width: 300,
+        margin: 1,
+        color: { dark: "#000000", light: "#ffffff00" },
+        errorCorrectionLevel: "M",
+      });
+      console.log("✅ Pre-generated QR code data URL for PDF");
+    } catch (qrErr) {
+      console.warn("⚠️ Failed to pre-generate QR code:", qrErr.message);
+    }
+
+    // Normalize table rows in pages — AI may return row objects {"0":"val"} instead of arrays
+    if (normalizedData.pages && Array.isArray(normalizedData.pages)) {
+      for (const page of normalizedData.pages) {
+        if (!page.blocks || !Array.isArray(page.blocks)) continue;
+        for (const block of page.blocks) {
+          if (block.type === 'table' && Array.isArray(block.rows)) {
+            block.rows = block.rows.map(row => {
+              if (Array.isArray(row)) return row;
+              if (row && typeof row === 'object') {
+                return Object.keys(row)
+                  .sort((a, b) => Number(a) - Number(b))
+                  .map(k => String(row[k] ?? ''));
+              }
+              return [String(row ?? '')];
+            });
+          }
+        }
+      }
+      console.log("✅ Normalized table rows in page blocks");
+    }
 
     console.log(
       "📊 Normalized data for injection (with documentId):",
@@ -287,194 +396,138 @@ router.post("/export-pdf", async (req, res) => {
     });
     console.log("🔍 Fresh data injection check:", injectionCheck);
 
-    // Wait for the bulletin template to render
+    // Wait for the bulletin template to render with data
     console.log("⏳ Waiting for bulletin template to render...");
-
-    // Try multiple selectors as fallback
-    const selectors = [
-      waitSelector,
-      '[data-testid="bulletin-template"]',
-      ".bulletin-container",
-    ];
-    let templateFound = false;
-
-    for (const selector of selectors) {
-      try {
-        console.log(`🔍 Trying selector: ${selector}`);
-        await page.waitForSelector(selector, { timeout: 5000 });
-        console.log(`✅ Found element with selector: ${selector}`);
-        templateFound = true;
-        break;
-      } catch (error) {
-        console.log(`❌ Selector ${selector} not found: ${error.message}`);
-      }
-    }
-
-    if (!templateFound) {
-      // Try to see what's actually on the page
-      const pageContent = await page.evaluate(() => {
-        return {
-          title: document.title,
-          bodyContent: document.body
-            ? document.body.innerHTML.substring(0, 500)
-            : "No body",
-          rootContent: document.querySelector("#root")
-            ? document.querySelector("#root").innerHTML.substring(0, 500)
-            : "No root",
-        };
-      });
-      console.log("📄 Page content debug:", pageContent);
-      throw new Error("Could not find bulletin template on page");
-    }
-
-    // Wait for content to be populated - check if student name is present
-    console.log("⏳ Waiting for student data to be populated in template...");
     console.log("🔍 Looking for student name:", normalizedData.studentName);
 
-    // Debug: Check current template state before waiting
-    const templateState = await page.evaluate(() => {
-      const template = document.querySelector("#bulletin-template");
-      if (!template) return { found: false };
+    // Wait for #bulletin-template to exist AND have substantial rendered content
+    // (CardOnlyPage always renders #bulletin-template — first as loading spinner, then as actual template)
+    try {
+      await page.waitForFunction(
+        (expectedStudentName) => {
+          const template =
+            document.querySelector("#bulletin-template") ||
+            document.querySelector('[data-testid="bulletin-template"]') ||
+            document.querySelector(".bulletin-container");
 
-      const textContent = template.textContent || "";
-      const htmlLength = template.innerHTML.length;
+          if (!template) return false;
 
-      return {
-        found: true,
-        textContent: textContent.substring(0, 200), // First 200 chars
-        htmlLength: htmlLength,
-        hasStudentName:
-          textContent.includes("Student") || textContent.includes("MUKENDI"),
-        containsText: textContent.trim().length > 0,
-      };
-    });
+          const templateText = template.textContent || "";
+          const templateHTML = template.innerHTML || "";
 
-    console.log("📊 Template state before waiting:", templateState);
+          // Must not be the loading spinner
+          if (templateText.includes("Loading bulletin template")) return false;
+          if (templateText.includes("No student data available")) return false;
 
-    await page.waitForFunction(
-      (expectedStudentName) => {
-        const template =
-          document.querySelector("#bulletin-template") ||
-          document.querySelector('[data-testid="bulletin-template"]') ||
-          document.querySelector(".bulletin-container");
+          // Check for substantial content (template has rendered, not just empty shell)
+          const hasSubstantialContent = templateHTML.length > 1000;
+          const hasAnyMeaningfulContent = templateText.trim().length > 100;
 
-        if (!template) {
-          console.log("No template found");
-          return false;
-        }
+          // Check for student name presence
+          const hasStudentName =
+            (expectedStudentName && expectedStudentName !== "undefined" && templateText.includes(expectedStudentName)) ||
+            templateText.includes("MUKENDI") ||
+            templateText.includes("Student Name") ||
+            templateText.includes("Test Student");
 
-        // Check if template has the specific student name from our data
-        const templateText = template.textContent || "";
-        const templateHTML = template.innerHTML || "";
+          // Check for template structure keywords (covers bulletins + DRC templates + general)
+          const hasTemplateStructure =
+            templateText.includes("Student Information") ||
+            templateText.includes("Grade") ||
+            templateText.includes("Subject") ||
+            templateText.includes("Mathematics") ||
+            templateHTML.includes("table") ||
+            templateHTML.includes("student-name") ||
+            // DRC template keywords
+            templateText.includes("DIPLOMA") ||
+            templateText.includes("REPUBLIC") ||
+            templateText.includes("ATTESTATION") ||
+            templateText.includes("TRANSCRIPT") ||
+            templateText.includes("UNIVERSITY") ||
+            templateText.includes("MINISTRY") ||
+            templateText.includes("Certificate") ||
+            templateText.includes("Diploma") ||
+            // General document keywords
+            templateHTML.includes("page-block") ||
+            templateHTML.includes("document-page");
 
-        // More flexible checks
-        const hasStudentName =
-          templateText.includes(expectedStudentName) ||
-          templateHTML.includes(expectedStudentName) ||
-          templateText.includes("MUKENDI") || // Fallback to sample data name
-          templateText.includes("Student Name") ||
-          templateText.includes("Test Student"); // For test data
-
-        // Check if template has substantial content (not just empty template)
-        const hasSubstantialContent = templateHTML.length > 1000; // Reduced threshold
-
-        // Check if template has student information structure
-        const hasStudentInfo =
-          templateText.includes("Student Information") ||
-          templateText.includes("Grade") ||
-          templateText.includes("Subject") ||
-          templateText.includes("Mathematics") ||
-          templateText.includes("English") ||
-          templateText.includes("French") ||
-          templateHTML.includes("table") ||
-          templateHTML.includes("student-name") ||
-          templateHTML.includes("subject-grade");
-
-        // Check if we have any data in the template at all
-        const hasAnyMeaningfulContent =
-          templateText.trim().length > 100 &&
-          !templateText.includes("Loading") &&
-          !templateText.includes("No data");
-
-        console.log("=== Template Check Results ===");
-        console.log("Template found:", !!template);
-        console.log("Template text length:", templateText.length);
-        console.log("Template HTML length:", templateHTML.length);
-        console.log("Expected student name:", expectedStudentName);
-        console.log("Has student name:", hasStudentName);
-        console.log("Has substantial content:", hasSubstantialContent);
-        console.log("Has student info structure:", hasStudentInfo);
-        console.log("Has any meaningful content:", hasAnyMeaningfulContent);
-        console.log("Template text preview:", templateText.substring(0, 200));
-        console.log("==============================");
-
-        // Return true if we have meaningful content OR proper structure
-        return (
-          (hasStudentName && hasSubstantialContent) ||
-          (hasStudentInfo && hasAnyMeaningfulContent) ||
-          (hasSubstantialContent && hasAnyMeaningfulContent)
-        );
-      },
-      { timeout: 20000 }, // Increased timeout to 20 seconds
-      normalizedData?.studentName || "MUKENDI",
-    );
+          // Pass if we have enough rendered content
+          return (
+            (hasStudentName && hasSubstantialContent) ||
+            (hasTemplateStructure && hasAnyMeaningfulContent) ||
+            (hasSubstantialContent && hasAnyMeaningfulContent)
+          );
+        },
+        { timeout: 25000, polling: 1000 },
+        normalizedData?.studentName || "MUKENDI",
+      );
+      console.log("✅ Template rendered with content");
+    } catch (waitError) {
+      // Even if the content check times out, check if template exists at all
+      const debugInfo = await page.evaluate(() => {
+        const tmpl = document.querySelector("#bulletin-template");
+        const root = document.querySelector("#root");
+        return {
+          hasTemplate: !!tmpl,
+          templateHTML: tmpl ? tmpl.innerHTML.length : 0,
+          templateText: tmpl ? (tmpl.textContent || "").substring(0, 300) : "N/A",
+          rootHTML: root ? root.innerHTML.substring(0, 500) : "No root",
+        };
+      });
+      console.warn("⚠️ Template content wait timed out. Debug:", debugInfo);
+      // If template has some content (>500 chars HTML), proceed anyway
+      if (debugInfo.hasTemplate && debugInfo.templateHTML > 500) {
+        console.log("⚠️ Proceeding with partially loaded template");
+      } else {
+        throw new Error("Could not find rendered bulletin template on page");
+      }
+    }
 
     // Wait an additional moment for any dynamic content to load
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Wait for images if requested (especially QR codes)
     if (waitForImages) {
-      console.log("⏳ Waiting for all images (including QR codes) to load...");
+      console.log("⏳ Waiting for images (including QR codes) to load...");
 
-      await page.waitForFunction(
-        () => {
-          const images = Array.from(document.querySelectorAll("img"));
-          const qrImages = Array.from(
-            document.querySelectorAll(
-              '.qr-container img, [data-print-element="qr-image"]',
-            ),
-          );
+      try {
+        await page.waitForFunction(
+          () => {
+            const images = Array.from(document.querySelectorAll("img"));
+            if (images.length === 0) return true; // No images to wait for
 
-          console.log(
-            `Found ${images.length} total images, ${qrImages.length} QR images`,
-          );
-
-          // Check if all images are loaded
-          const allImagesLoaded = images.every((img) => {
-            if (img.complete && img.naturalHeight !== 0) {
-              return true;
-            }
-            console.log("Waiting for image:", img.src || img.alt || "unknown");
-            return false;
-          });
-
-          // Special check for QR codes
-          const qrCodesLoaded =
-            qrImages.length === 0 ||
-            qrImages.every((img) => {
-              const loaded = img.complete && img.naturalHeight !== 0;
-              if (!loaded) {
-                console.log(
-                  "Waiting for QR code:",
-                  img.src ? img.src.substring(0, 50) : "unknown",
-                );
+            // Count loaded vs total
+            let loaded = 0;
+            let total = images.length;
+            for (const img of images) {
+              if (img.complete && img.naturalHeight !== 0) {
+                loaded++;
               }
-              return loaded;
-            });
+            }
 
-          console.log(
-            `Images loaded: ${allImagesLoaded}, QR codes loaded: ${qrCodesLoaded}`,
-          );
-          return allImagesLoaded && qrCodesLoaded;
-        },
-        { timeout: 15000, polling: 1000 },
-      );
-
-      console.log("✅ All images (including QR codes) have loaded");
+            console.log(`Images: ${loaded}/${total} loaded`);
+            // Pass if all loaded, or if at least some loaded (QR may fail in Puppeteer context)
+            return loaded === total;
+          },
+          { timeout: 10000, polling: 1000 },
+        );
+        console.log("✅ All images loaded");
+      } catch (imgError) {
+        // Non-fatal — proceed with PDF even if some images (like QR codes) didn't load
+        const imgDebug = await page.evaluate(() => {
+          const imgs = Array.from(document.querySelectorAll("img"));
+          return imgs.map((img) => ({
+            src: (img.src || "").substring(0, 80),
+            complete: img.complete,
+            height: img.naturalHeight,
+          }));
+        });
+        console.warn("⚠️ Some images did not load in time, proceeding anyway:", imgDebug);
+      }
     }
 
     // Hide all elements except the bulletin template
-    await page.evaluate((selector) => {
+    await page.evaluate((selector, isLandscape) => {
       // Hide body's direct children except the bulletin container
       const body = document.body;
       const bulletinElement = document.querySelector(selector);
@@ -500,23 +553,40 @@ router.post("/export-pdf", async (req, res) => {
         // Remove any shadows or borders that might affect PDF
         bulletinElement.style.boxShadow = "none";
         bulletinElement.style.border = "none";
+
+        // For landscape templates, inject CSS @page rule
+        if (isLandscape) {
+          document.body.style.width = "297mm";
+          document.body.style.height = "210mm";
+          document.body.style.margin = "0";
+
+          const style = document.createElement("style");
+          style.textContent = `
+            @page { size: A4 landscape; margin: 0; }
+            @media print { body { margin: 0; } }
+          `;
+          document.head.appendChild(style);
+        }
       }
-    }, waitSelector);
+    }, waitSelector, needsLandscape);
 
     // Generate PDF
     const defaultPdfOptions = {
       format: "A4",
       printBackground: true,
+      landscape: needsLandscape,
       margin: {
-        top: "10mm",
-        bottom: "10mm",
-        left: "10mm",
-        right: "10mm",
+        top: needsLandscape ? "5mm" : "10mm",
+        bottom: needsLandscape ? "5mm" : "10mm",
+        left: needsLandscape ? "5mm" : "10mm",
+        right: needsLandscape ? "5mm" : "10mm",
       },
       preferCSSPageSize: true,
     };
 
     const finalPdfOptions = { ...defaultPdfOptions, ...pdfOptions };
+    // Ensure landscape is always set correctly based on formType (override client pdfOptions)
+    finalPdfOptions.landscape = needsLandscape;
     console.log("📄 Generating PDF with options:", finalPdfOptions);
 
     const pdfBuffer = await page.pdf(finalPdfOptions);

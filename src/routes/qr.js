@@ -33,9 +33,12 @@ router.get("/:documentId", async (req, res) => {
       });
     }
 
-    // Create verification URL
+    // Create verification URL — supports both legacy doc IDs and NTC-YYYY-XXXXXX certification IDs
     const baseUrl = process.env.FRONTEND_URL || "https://nyotatranslate.com";
-    const verificationUrl = `${baseUrl}/verify?doc=${documentId}`;
+    const isCertId = /^NTC-\d{4}-[A-Z2-9]{6}$/.test(documentId);
+    const verificationUrl = isCertId
+      ? `${baseUrl}/verify?cert=${documentId}`
+      : `${baseUrl}/verify?doc=${documentId}`;
 
     console.log(`🔗 Generating QR code for document: ${documentId}`);
     console.log(`🔗 Verification URL: ${verificationUrl}`);

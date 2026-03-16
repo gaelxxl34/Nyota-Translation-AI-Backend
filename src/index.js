@@ -12,6 +12,27 @@ const config = require("./config/env");
 const { verifyToken, initializeFirebaseAdmin } = require("./auth");
 initializeFirebaseAdmin();
 
+// One-time migration: update old UGX pricing to USD in Firestore settings
+(async () => {
+  try {
+    const admin = require("firebase-admin");
+    const db = admin.firestore();
+    const doc = await db.collection("system").doc("systemSettings").get();
+    if (doc.exists) {
+      const data = doc.data();
+      if (data.pricePerDocument >= 1000 || data.currency === "UGX") {
+        await db.collection("system").doc("systemSettings").update({
+          pricePerDocument: 30,
+          currency: "USD",
+        });
+        console.log("✅ Migrated pricing from UGX to $30 USD per page");
+      }
+    }
+  } catch (err) {
+    console.error("⚠️ Settings migration skipped:", err.message);
+  }
+})();
+
 // Now import routes that depend on Firebase
 const uploadRoutes = require("./routes/upload");
 const pdfRoutes = require("./routes/pdf");
@@ -29,6 +50,9 @@ const collegeAttestationPdfRoutes = require("./routes/collegeAttestationPdf");
 const highSchoolAttestationPdfRoutes = require("./routes/highSchoolAttestationPdf");
 const qrRoutes = require("./routes/qr");
 const verifyRoutes = require("./routes/verify");
+const authRoutes = require("./routes/authRoutes");
+const certificationRoutes = require("./routes/certification");
+const paymentRoutes = require("./routes/payment");
 
 const app = express();
 
@@ -43,7 +67,7 @@ app.use(
   cors({
     origin: config.cors.origins,
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
@@ -58,6 +82,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Stripe webhook needs raw body — must be registered BEFORE express.json()
+app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -92,6 +119,9 @@ app.use("/api", bachelorDiplomaPdfRoutes);
 app.use("/api", collegeTranscriptPdfRoutes);
 app.use("/api", collegeAttestationPdfRoutes);
 app.use("/api", highSchoolAttestationPdfRoutes);
+app.use("/api/auth", authRoutes); // Auth routes (public - registration, verification)
+app.use("/api/certification", certificationRoutes); // Certification routes (mixed auth - some public for verification)
+app.use("/api/payments", paymentRoutes); // Payment routes (auth handled inside routes, webhook uses raw body)
 app.use("/api/qr", qrRoutes); // QR code generation routes (public - no auth required)
 app.use("/api/verify", verifyRoutes); // Document verification routes (public - no auth required)
 app.use("/api", verifyToken, bulletinRoutes); // Protected bulletin routes
@@ -137,6 +167,14 @@ server.listen(config.server.port, () => {
   console.log(`🚀 NTC Backend server running on port ${config.server.port}`);
   console.log(`🌍 Environment: ${config.server.nodeEnv}`);
   console.log(`⏱️ Server timeout: ${server.timeout}ms`);
+
+  // Periodic cleanup: expire stale pending payments every hour
+  const paymentService = require("./services/paymentService");
+  setInterval(() => {
+    paymentService.expireStalePayments().catch((err) =>
+      console.error("⚠️ Stale payment cleanup error:", err.message)
+    );
+  }, 60 * 60 * 1000); // Every 1 hour
 });
 
 module.exports = app;

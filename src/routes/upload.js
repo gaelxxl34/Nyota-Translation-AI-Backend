@@ -1,14 +1,17 @@
 // File Upload Routes for NTC
-// Handles bulletin file uploads and processing
+// Handles document file uploads and AI processing
 
 const express = require("express");
 const { verifyToken } = require("../auth");
 const { upload, handleMulterError } = require("../middleware/upload");
 const {
   uploadToStorage,
+  deleteFromStorage,
   deleteLocalFile,
   generateStoragePath,
 } = require("../services/storage");
+const { VALID_FORM_TYPES } = require("../config/documentTypes");
+const { cache, keys } = require("../services/cache");
 
 // Delayed configuration loading to ensure environment variables are available
 let processDocument;
@@ -22,7 +25,7 @@ const initializeAI = () => {
   processDocument = aiRouter.processDocument;
 
   console.log(
-    `🤖 AI System: ROUTER (Claude for bulletins, OpenAI for diplomas/attestations)`,
+    `🤖 AI System: ROUTER (Claude for bulletins, OpenAI for diplomas/attestations/general)`,
   );
   isInitialized = true;
 };
@@ -63,19 +66,8 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
     // Extract and validate form type from request body
     let formType = req.body.formType || "form6"; // Default to form6 for backwards compatibility
 
-    // Validate form type - now supporting all 8 document types
-    const validFormTypes = [
-      "form4",
-      "form6",
-      "collegeTranscript",
-      "collegeAttestation",
-      "stateDiploma",
-      "bachelorDiploma",
-      "highSchoolAttestation",
-      "stateExamAttestation",
-      "generalDocument",
-    ];
-    if (!validFormTypes.includes(formType)) {
+    // Validate form type using centralized config
+    if (!VALID_FORM_TYPES.includes(formType)) {
       console.warn(
         `⚠️ Invalid form type received: ${formType}, defaulting to form6`,
       );
@@ -84,9 +76,11 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
 
     console.log(`  - Form type: ${formType}`);
 
-    // Extract target language for general document translation
+    // Extract source and target language
+    const sourceLanguage = req.body.sourceLanguage || "auto";
     const targetLanguage = req.body.targetLanguage || "english";
     if (formType === "generalDocument") {
+      console.log(`  - Source language: ${sourceLanguage}`);
       console.log(`  - Target language: ${targetLanguage}`);
     }
 
@@ -103,7 +97,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
       });
 
       const extractionResult = await Promise.race([
-        processDocument(req.file.path, formType, { targetLanguage }),
+        processDocument(req.file.path, formType, { sourceLanguage, targetLanguage }),
         processingTimeout,
       ]);
 
@@ -176,17 +170,30 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         // Generate bulletin document ID
         firestoreDocId = `bulletin_${req.user.uid}_${Date.now()}`;
 
-        // Clean data to remove undefined values for Firestore
-        const cleanDataForFirestore = (data) => {
+        // Clean data for Firestore: remove undefined, cap depth, convert nested arrays
+        // Firestore does NOT allow arrays within arrays, so we convert inner arrays to maps
+        const cleanDataForFirestore = (data, depth = 0, insideArray = false) => {
           if (data === null || data === undefined) return null;
           if (typeof data !== "object") return data;
-          if (Array.isArray(data))
-            return data.map((item) => cleanDataForFirestore(item));
+          // Firestore has a 20-level nesting limit; stringify anything deeper than 15
+          if (depth > 15) return JSON.stringify(data);
+
+          if (Array.isArray(data)) {
+            if (insideArray) {
+              // Firestore forbids nested arrays — convert inner array to a map with index keys
+              const obj = {};
+              data.forEach((item, i) => {
+                obj[String(i)] = cleanDataForFirestore(item, depth + 1, false);
+              });
+              return obj;
+            }
+            return data.map((item) => cleanDataForFirestore(item, depth + 1, true));
+          }
 
           const cleaned = {};
           for (const [key, value] of Object.entries(data)) {
             if (value !== undefined) {
-              cleaned[key] = cleanDataForFirestore(value);
+              cleaned[key] = cleanDataForFirestore(value, depth + 1, false);
             }
           }
           return cleaned;
@@ -201,6 +208,8 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           id: firestoreDocId,
           userId: req.user.uid,
           userEmail: req.user.email,
+          formType: formType, // Top-level formType for easy access
+          sourceLanguage: sourceLanguage, // Top-level sourceLanguage for easy access
           originalData: cleanedData,
           editedData: cleanedData,
           metadata: {
@@ -217,6 +226,7 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
             localFilePath: req.file.path, // Keep for fallback/debugging
             status: extractionResult.success ? "processed" : "failed",
             formType: formType, // Add form type to metadata
+            sourceLanguage: sourceLanguage,
             targetLanguage:
               formType === "generalDocument" ? targetLanguage : null,
             studentName:
@@ -235,6 +245,9 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
 
         // Save the main bulletin document
         await db.collection("bulletins").doc(firestoreDocId).set(bulletinDoc);
+
+        // Invalidate user's bulletin list cache
+        await cache.del(keys.userBulletins(req.user.uid));
 
         console.log(`✅ Saved bulletin document with form type: ${formType}`);
         console.log(`📊 Document ID: ${firestoreDocId}`);
@@ -270,18 +283,26 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           `⚠️ Failed to save to Firestore: ${firestoreError.message}`,
         );
         console.error("Firestore error details:", firestoreError);
+
+        // Clean up orphaned Storage file if Firestore save failed
+        if (storageResult.success && storageResult.storagePath) {
+          try {
+            await deleteFromStorage(storageResult.storagePath);
+            console.log(`🧹 Cleaned up orphaned Storage file: ${storageResult.storagePath}`);
+          } catch (cleanupErr) {
+            console.warn(`⚠️ Failed to clean up orphaned Storage file: ${cleanupErr.message}`);
+          }
+        }
       }
 
-      // Clean up local file after successful Firebase Storage upload
-      if (storageResult.success) {
-        try {
-          await deleteLocalFile(req.file.path);
-          console.log(`🧹 Local file cleaned up after successful cloud upload`);
-        } catch (cleanupError) {
-          console.warn(
-            `⚠️ Failed to clean up local file: ${cleanupError.message}`,
-          );
-        }
+      // Always clean up local file after processing (regardless of Storage/Firestore success)
+      try {
+        await deleteLocalFile(req.file.path);
+        console.log(`🧹 Local file deleted: ${req.file.path}`);
+      } catch (cleanupError) {
+        console.warn(
+          `⚠️ Failed to clean up local file: ${cleanupError.message}`,
+        );
       }
 
       // Return the extracted and translated data
@@ -338,13 +359,18 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
           userId: req.user.uid,
           formType: formType,
         });
-        if (errorStorageResult.success) {
-          await deleteLocalFile(req.file.path);
-        }
       } catch (storageErr) {
         console.warn(
           `⚠️ Storage upload failed during error handling: ${storageErr.message}`,
         );
+      }
+
+      // Always clean up local file
+      try {
+        await deleteLocalFile(req.file.path);
+        console.log(`🧹 Local file deleted after error: ${req.file.path}`);
+      } catch (cleanupErr) {
+        console.warn(`⚠️ Failed to clean up local file: ${cleanupErr.message}`);
       }
 
       // Return appropriate error response
@@ -389,6 +415,16 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
   } catch (error) {
     console.error("🚨 Upload processing failed:", error.message);
     console.error("🚨 Stack trace:", error.stack);
+
+    // Always clean up local file on total failure
+    if (req.file?.path) {
+      try {
+        await deleteLocalFile(req.file.path);
+        console.log(`🧹 Local file deleted after failure: ${req.file.path}`);
+      } catch (cleanupErr) {
+        console.warn(`⚠️ Cleanup failed: ${cleanupErr.message}`);
+      }
+    }
 
     // Ensure we always return a JSON response
     if (!res.headersSent) {
@@ -630,6 +666,9 @@ router.post(
         };
 
         await db.collection("bulletins").doc(firestoreDocId).set(bulletinDoc);
+
+        // Invalidate user's bulletin list cache
+        await cache.del(keys.userBulletins(req.user.uid));
 
         if (cleanedData) {
           await db

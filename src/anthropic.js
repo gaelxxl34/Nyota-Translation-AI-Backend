@@ -36,6 +36,7 @@ const getMimeType = (extension) => {
     ".png": "image/png",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".pdf": "application/pdf",
   };
 
   return mimeTypes[extension] || "image/jpeg";
@@ -606,9 +607,126 @@ const extractBulletinWithClaude = async (filePath, formType = "form6") => {
   }
 };
 
+/**
+ * Extract a general document using Claude
+ * Reuses the generalDocument system/user prompts from openai.js
+ * @param {string} filePath - Path to the uploaded file
+ * @param {Object} options - Processing options (sourceLanguage, targetLanguage)
+ * @returns {Promise<Object>} Extracted and translated data
+ */
+const extractGeneralDocumentWithClaude = async (filePath, options = {}) => {
+  console.log(`🔍 Starting Claude Sonnet 4 general document processing for: ${filePath}`);
+
+  // Import prompt generators from openai.js (shared prompts)
+  const { getSystemPrompt, getUserPrompt, processExtractedData } = require("./openai");
+
+  try {
+    // Step 1: Prepare file for processing
+    const fileData = prepareFileForClaude(filePath);
+    const isPDF = fileData.fileExtension === ".pdf";
+    console.log(
+      `📄 File prepared: ${fileData.filename}, size: ${fileData.fileStats.size} bytes, type: ${isPDF ? "PDF" : "image"}`,
+    );
+
+    // Step 2: Get the generalDocument prompts and append Claude-specific exclusion rules
+    const baseSystemPrompt = getSystemPrompt("generalDocument", options);
+    const systemPrompt = baseSystemPrompt + `
+
+🚫 CONTENT TO EXCLUDE (DO NOT EXTRACT):
+- Disclaimer text about signatures, seals, or document validity (e.g., "This document is valid only with official seals and signatures", "Must be presented together with educational credentials", etc.)
+- Watermarks or background text that say "COPY", "ORIGINAL", "CERTIFIED", etc.
+- Any text that refers to the physical authenticity or legal validity of the ORIGINAL paper document — these do not apply to the translated version`;
+    const userPrompt = getUserPrompt("generalDocument", options);
+
+    // Step 3: Call Claude API with the document
+    const anthropic = initializeAnthropic();
+    console.log(`📤 Processing ${fileData.fileExtension} file with Claude Sonnet 4...`);
+
+    // Build the content block based on file type
+    const fileContent = isPDF
+      ? {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: fileData.base64File,
+          },
+        }
+      : {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: fileData.mimeType,
+            data: fileData.base64File,
+          },
+        };
+
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 16000, // Higher limit for multi-page general documents
+      system: systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: [
+            fileContent,
+            {
+              type: "text",
+              text: userPrompt,
+            },
+          ],
+        },
+      ],
+      temperature: 0.0,
+    });
+
+    const aiResponse =
+      message.content[0]?.type === "text" ? message.content[0].text : null;
+
+    if (!aiResponse) {
+      throw new Error("No response received from Claude");
+    }
+
+    console.log("🤖 Raw Claude response received");
+
+    // Step 4: Parse response (reuse existing parser)
+    const extractedData = parseClaudeResponse(aiResponse);
+
+    // Step 5: Validate using the shared validation logic
+    const { extractedData: processedData, validationResult } =
+      processExtractedData(extractedData, "generalDocument");
+
+    console.log(
+      "✅ Successfully extracted general document with Claude:",
+      processedData.documentTitle || "Unknown Document",
+    );
+
+    // Step 6: Return results
+    return {
+      success: true,
+      data: processedData,
+      validation: validationResult,
+      metadata: {
+        filename: fileData.filename,
+        fileSize: fileData.fileStats.size,
+        processingTime: new Date().toISOString(),
+        model: "claude-sonnet-4-20250514",
+        provider: "anthropic",
+        formType: "generalDocument",
+        strictMode: true,
+        extractionQuality: validationResult.extractionQuality,
+        hasMinimumData: validationResult.hasMinimumData,
+      },
+    };
+  } catch (error) {
+    handleClaudeError(error);
+  }
+};
+
 module.exports = {
   initializeAnthropic,
   extractBulletinWithClaude,
+  extractGeneralDocumentWithClaude,
   getClaudeSystemPrompt,
   getClaudeUserPrompt,
   prepareFileForClaude,

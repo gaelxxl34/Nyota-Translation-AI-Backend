@@ -35,6 +35,12 @@ const config = {
     apiKey: process.env.OPENAI_API_KEY,
   },
 
+  // Stripe Configuration
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY,
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  },
+
   // Firebase Configuration
   firebase: {
     serviceAccountKeyPath:
