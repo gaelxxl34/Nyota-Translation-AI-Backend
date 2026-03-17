@@ -83,7 +83,8 @@ router.post("/export-pdf", async (req, res) => {
         finalStudentData = certData.certifiedData || certData.editedData || certData.originalData;
         formType = certData.formType || finalStudentData?.formType || "form6";
         tableSize = finalStudentData?.tableSize || "auto";
-        resolvedDocumentId = certData.bulletinId || certDocId;
+        // Use certification ID for QR code so scanning shows certified verification
+        resolvedDocumentId = certData.certification?.certificationId || certData.bulletinId || certDocId;
 
         if (finalStudentData) {
           finalStudentData.formType = formType;
