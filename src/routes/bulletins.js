@@ -8,7 +8,7 @@ const router = express.Router();
 
 // Initialize Firebase Admin if not already initialized
 const { initializeFirebaseAdmin } = require("../auth");
-const { deleteFromStorage } = require("../services/storage");
+const { deleteFromStorage, downloadFromStorage } = require("../services/storage");
 
 // GET /api/bulletins/my - List current user's bulletins (drafts/processed docs)
 router.get("/bulletins/my", async (req, res) => {
@@ -360,6 +360,179 @@ router.delete("/bulletins/:id", async (req, res) => {
       error: "Failed to delete bulletin",
       details: error.message,
     });
+  }
+});
+
+// POST /api/bulletins/:id/retry - Retry AI processing for a failed bulletin
+router.post("/bulletins/:id/retry", async (req, res) => {
+  try {
+    const { id: bulletinId } = req.params;
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    initializeFirebaseAdmin();
+    const db = admin.firestore();
+
+    const bulletinDoc = await db.collection("bulletins").doc(bulletinId).get();
+    if (!bulletinDoc.exists) {
+      return res.status(404).json({ error: "Bulletin not found" });
+    }
+
+    const bulletinData = bulletinDoc.data();
+    if (bulletinData.userId !== userId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const status = bulletinData.metadata?.status;
+    if (status !== "processing_failed" && status !== "failed") {
+      return res.status(400).json({ error: "Document is not in a failed state" });
+    }
+
+    const storagePath = bulletinData.metadata?.storagePath;
+    if (!storagePath) {
+      return res.status(400).json({ error: "No stored file found for this document. Please upload again." });
+    }
+
+    // Download file from Firebase Storage to a temp location
+    const path = require("path");
+    const os = require("os");
+    const ext = path.extname(bulletinData.metadata?.fileName || ".pdf");
+    const tempPath = path.join(os.tmpdir(), `retry_${bulletinId}_${Date.now()}${ext}`);
+
+    const downloadResult = await downloadFromStorage(storagePath, tempPath);
+    if (!downloadResult.success) {
+      return res.status(500).json({ error: "Failed to retrieve stored file: " + downloadResult.error });
+    }
+
+    // Process with AI
+    const aiRouter = require("../ai-router");
+    const formType = bulletinData.formType || bulletinData.metadata?.formType || "generalDocument";
+    const sourceLanguage = bulletinData.sourceLanguage || bulletinData.metadata?.sourceLanguage || "auto";
+    const targetLanguage = bulletinData.metadata?.targetLanguage || "english";
+
+    console.log(`🔄 Retrying AI processing for bulletin ${bulletinId} (${formType})...`);
+
+    const processingTimeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("AI processing timeout after 4 minutes")), 240000);
+    });
+
+    let extractionResult;
+    try {
+      extractionResult = await Promise.race([
+        aiRouter.processDocument(tempPath, formType, { sourceLanguage, targetLanguage }),
+        processingTimeout,
+      ]);
+    } catch (aiError) {
+      // Update the error message but keep status as failed
+      await db.collection("bulletins").doc(bulletinId).update({
+        "metadata.processingError": aiError.message,
+        "metadata.lastModified": admin.firestore.FieldValue.serverTimestamp(),
+        "metadata.lastRetryAt": new Date().toISOString(),
+      });
+      await cache.del(keys.userBulletins(userId));
+      await cache.del(keys.bulletin(bulletinId));
+
+      // Clean up temp file
+      try { require("fs").unlinkSync(tempPath); } catch {}
+
+      return res.status(206).json({
+        success: false,
+        error: aiError.message,
+        message: "AI processing failed again. Please try later or contact support.",
+      });
+    }
+
+    // Clean up temp file
+    try { require("fs").unlinkSync(tempPath); } catch {}
+
+    if (!extractionResult || !extractionResult.success) {
+      await db.collection("bulletins").doc(bulletinId).update({
+        "metadata.processingError": extractionResult?.error || "Processing returned no data",
+        "metadata.lastModified": admin.firestore.FieldValue.serverTimestamp(),
+        "metadata.lastRetryAt": new Date().toISOString(),
+      });
+      await cache.del(keys.userBulletins(userId));
+      await cache.del(keys.bulletin(bulletinId));
+
+      return res.status(206).json({
+        success: false,
+        error: extractionResult?.error || "Processing returned no data",
+      });
+    }
+
+    // Clean data for Firestore
+    const cleanDataForFirestore = (data, depth = 0, insideArray = false) => {
+      if (data === null || data === undefined) return null;
+      if (typeof data !== "object") return data;
+      if (depth > 15) return JSON.stringify(data);
+      if (Array.isArray(data)) {
+        if (insideArray) {
+          const obj = {};
+          data.forEach((item, i) => { obj[String(i)] = cleanDataForFirestore(item, depth + 1, false); });
+          return obj;
+        }
+        return data.map((item) => cleanDataForFirestore(item, depth + 1, true));
+      }
+      const cleaned = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+          cleaned[key] = cleanDataForFirestore(value, depth + 1, false);
+        }
+      }
+      return cleaned;
+    };
+
+    const cleanedData = cleanDataForFirestore(extractionResult.data);
+
+    // Update the bulletin with successful processing results
+    await db.collection("bulletins").doc(bulletinId).update({
+      originalData: cleanedData,
+      editedData: cleanedData,
+      "metadata.status": "processed",
+      "metadata.processingError": admin.firestore.FieldValue.delete(),
+      "metadata.isTimeout": admin.firestore.FieldValue.delete(),
+      "metadata.lastModified": admin.firestore.FieldValue.serverTimestamp(),
+      "metadata.lastRetryAt": new Date().toISOString(),
+      "metadata.studentName":
+        cleanedData?.studentName ||
+        cleanedData?.academicInfo?.studentName ||
+        "Unknown Student",
+      versionCount: 1,
+      currentVersion: 1,
+    });
+
+    // Create initial version
+    await db
+      .collection("bulletins")
+      .doc(bulletinId)
+      .collection("versions")
+      .add({
+        versionNumber: 1,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        data: cleanedData,
+        changeType: "retry_processing",
+        formType: formType,
+        createdAt: new Date().toISOString(),
+        userId: userId,
+      });
+
+    await cache.del(keys.userBulletins(userId));
+    await cache.del(keys.bulletin(bulletinId));
+
+    console.log(`✅ Retry processing succeeded for bulletin ${bulletinId}`);
+
+    res.json({
+      success: true,
+      firestoreId: bulletinId,
+      formType: formType,
+      message: "Document processed successfully",
+    });
+  } catch (error) {
+    console.error("❌ Retry processing failed:", error.message);
+    res.status(500).json({ error: "Failed to retry processing", details: error.message });
   }
 });
 

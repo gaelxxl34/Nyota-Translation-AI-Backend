@@ -365,6 +365,54 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         );
       }
 
+      // Save a Firestore document so the user can see their upload and retry processing
+      let firestoreDocId = null;
+      try {
+        const admin = require("firebase-admin");
+        const db = admin.firestore();
+
+        firestoreDocId = `bulletin_${req.user.uid}_${Date.now()}`;
+
+        const failedBulletinDoc = {
+          id: firestoreDocId,
+          userId: req.user.uid,
+          userEmail: req.user.email,
+          formType: formType,
+          sourceLanguage: sourceLanguage,
+          originalData: null,
+          editedData: null,
+          metadata: {
+            uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastModified: admin.firestore.FieldValue.serverTimestamp(),
+            fileName: req.file.originalname,
+            fileSize: req.file.size,
+            storageUrl: errorStorageResult.success ? errorStorageResult.url : null,
+            storagePath: errorStorageResult.success ? errorStorageResult.storagePath : null,
+            storageBucket: errorStorageResult.success ? errorStorageResult.bucket : null,
+            localFilePath: req.file.path,
+            status: "processing_failed",
+            formType: formType,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: formType === "generalDocument" ? targetLanguage : null,
+            studentName: "Processing Failed",
+            processingError: openaiError.message,
+            isTimeout: isTimeout,
+            createdAt: new Date().toISOString(),
+            lastModifiedAt: new Date().toISOString(),
+          },
+          versionCount: 0,
+          currentVersion: 0,
+          tags: [],
+          isActive: true,
+        };
+
+        await db.collection("bulletins").doc(firestoreDocId).set(failedBulletinDoc);
+        await cache.del(keys.userBulletins(req.user.uid));
+        console.log(`📋 Saved failed processing record to Firestore: ${firestoreDocId}`);
+      } catch (firestoreErr) {
+        console.warn(`⚠️ Failed to save processing_failed record: ${firestoreErr.message}`);
+      }
+
       // Always clean up local file
       try {
         await deleteLocalFile(req.file.path);
@@ -398,13 +446,15 @@ router.post("/", verifyToken, upload.single("file"), async (req, res) => {
         processing: {
           success: false,
           error: openaiError.message,
-          formType: formType, // Include form type in processing error
+          formType: formType,
           isTimeout: isTimeout,
+          firestoreId: firestoreDocId,
           details: isTimeout
             ? "The document processing took too long. This might be due to a complex document or temporary API issues. Please try again with a smaller or simpler document."
             : "The file was uploaded successfully but could not be processed by AI. This might be due to API issues or invalid file content.",
         },
-        formType: formType, // Include form type at top level
+        firestoreId: firestoreDocId,
+        formType: formType,
         timestamp: new Date().toISOString(),
       });
     }

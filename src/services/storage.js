@@ -225,6 +225,32 @@ const getSignedUrl = async (storagePath, expiresInMinutes = 60) => {
   }
 };
 
+/**
+ * Download a file from Firebase Storage to a local temporary path
+ * @param {string} storagePath - Path to the file in Firebase Storage
+ * @param {string} localPath - Local file path to save the downloaded file
+ * @returns {Promise<{success: boolean, localPath?: string, error?: string}>}
+ */
+const downloadFromStorage = async (storagePath, localPath) => {
+  try {
+    const bucket = getBucket();
+    const file = bucket.file(storagePath);
+
+    await file.download({ destination: localPath });
+
+    return {
+      success: true,
+      localPath,
+    };
+  } catch (error) {
+    console.error("🚨 Failed to download from Storage:", error.message);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
 module.exports = {
   uploadToStorage,
   uploadBufferToStorage,
@@ -232,6 +258,7 @@ module.exports = {
   deleteLocalFile,
   generateStoragePath,
   getSignedUrl,
+  downloadFromStorage,
   getBucket,
   STORAGE_BUCKET,
 };
